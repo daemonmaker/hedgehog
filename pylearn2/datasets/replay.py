@@ -1,6 +1,12 @@
 """
 Class for managing datasets created online.
 """
+__authors__ = ["Dustin Webb"]
+__copyright__ = "Copyright 2014, Universite de Montreal"
+__credits__ = ["Dustin Webb", "Thomas Paine"]
+__license__ = "3-clause BSD"
+__maintainer__ = "Dustin Webb"
+__email__ = "webbd@iro"
 
 import numpy
 from pylearn2.datasets import Dataset
