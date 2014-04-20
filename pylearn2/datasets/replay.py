@@ -56,15 +56,15 @@ class Replay(Dataset):
         self.current_exp = 0
         self.full = False  # Whether the memory is full
 
-    def add(exp):
+    def add(phi, action, reward, phi_prime):
         """
         exp : tuple
             4-tuple containing phi_t, a_t, r_t, phi_{t+1}
         """
-        self.phis[self.current_exp, :] = exp[0]
-        self.actions[self.current_exp, :] = exp[1]
-        self.rewards[self.current_exp, :] = exp[2]
-        self.phi_primes[self.current_exp, :] = exp[3]
+        self.phis[self.current_exp, :] = phi
+        self.actions[self.current_exp, :] = action
+        self.rewards[self.current_exp, :] = reward
+        self.phi_primes[self.current_exp, :] = phi_prime
 
         self.current_exp += 1
         if self.current_exp >= self.total_size:
