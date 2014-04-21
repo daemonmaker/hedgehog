@@ -3,7 +3,7 @@ Class for managing datasets created online.
 """
 __authors__ = ["Dustin Webb"]
 __copyright__ = "Copyright 2014, Universite de Montreal"
-__credits__ = ["Dustin Webb", "Thomas Paine"]
+__credits__ = ["Dustin Webb", "Tom Le Paine"]
 __license__ = "3-clause BSD"
 __maintainer__ = "Dustin Webb"
 __email__ = "webbd@iro"
@@ -62,8 +62,7 @@ class Replay(Dataset):
 
     def add(self, phi, action, reward):
         """
-        exp : tuple
-            4-tuple containing phi_t, a_t, r_t, phi_{t+1}
+        phi_t, a_t, r_t, phi_{t+1}
         """
         self.phis[self.current_exp, :] = phi
         self.actions[self.current_exp, :] = action
