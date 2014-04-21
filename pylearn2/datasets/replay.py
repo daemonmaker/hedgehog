@@ -9,12 +9,14 @@ __maintainer__ = "Dustin Webb"
 __email__ = "webbd@iro"
 
 import numpy
+from pylearn2.utils import wraps
 from pylearn2.datasets import Dataset
+import pylearn2.utils.iteration as iteration
 import ipdb
 
 
 class Replay(Dataset):
-    def __init__(total_size, img_dims, num_frames, action_dims):
+    def __init__(self, total_size, img_dims, num_frames, action_dims):
         """
         total_size : int
             The total number of records to retain.
@@ -30,7 +32,8 @@ class Replay(Dataset):
         self.total_size = total_size
 
         assert(
-            len(img_dims.shape) == 2 and
+            type(img_dims) == tuple and
+            len(img_dims) == 2 and
             img_dims[0] > 0 and
             img_dims[1] > 0
         )
@@ -46,17 +49,18 @@ class Replay(Dataset):
         self.phis = numpy.zeros(
             (total_size, img_dims[0], img_dims[1], num_frames)
         )
-        self.phi_primes = numpy.zeros(
-            (total_size, img_dims[0], img_dims[1], num_frames)
-        )
         self.actions = numpy.zeros((total_size, action_dims))
-        self.rewards = numpy.zeros(total_size, 1)
+        self.rewards = numpy.zeros((total_size, 1))
+        self.idxs = numpy.arange(total_size)
 
         # Setup ring
         self.current_exp = 0
         self.full = False  # Whether the memory is full
 
-    def add(phi, action, reward, phi_prime):
+    def can_sample(self):
+        return self.full or (self.current_exp > 1)
+
+    def add(self, phi, action, reward):
         """
         exp : tuple
             4-tuple containing phi_t, a_t, r_t, phi_{t+1}
@@ -64,7 +68,6 @@ class Replay(Dataset):
         self.phis[self.current_exp, :] = phi
         self.actions[self.current_exp, :] = action
         self.rewards[self.current_exp, :] = reward
-        self.phi_primes[self.current_exp, :] = phi_prime
 
         self.current_exp += 1
         if self.current_exp >= self.total_size:
@@ -84,16 +87,17 @@ class Replay(Dataset):
         self.targets = targets
         self.rng = rng
 
+        total_size = self.total_size - 1
+        if not self.full:
+            total_size = self.current_exp
+        total_size -= 1
+
         # Setup iterator
         if mode == 'sequential' or mode == 'random_uniform':
-            total_size = self.total_size
-            if not self.full:
-                total_size = self.current_record
-
             # mode is sequential
             if mode == 'sequential':
-                self.subset_iterator = SequentialSubsetIterator(
-                    self.total_size,
+                self.iter = iteration.SequentialSubsetIterator(
+                    total_size,
                     batch_size,
                     num_batches,
                     rng=None
@@ -101,8 +105,8 @@ class Replay(Dataset):
 
             # mode is random uniform
             else:
-                self.iter = RandomUniformSubsetIterator(
-                    self.total_size,
+                self.iter = iteration.RandomUniformSubsetIterator(
+                    total_size,
                     batch_size,
                     num_batches,
                     rng
@@ -119,13 +123,79 @@ class Replay(Dataset):
         return self
 
     def next(self):
-        slice = self.subset_iterator.next()
+        slice = self.iter.next()
+        ids = self.idxs[slice].copy()
+        if self.full:
+            ids += self.current_exp
+            ids %= self.total_size
+
+        phi_prime_ids = (ids+1) % self.total_size
+
         return (
-            self.phis[slice],
-            self.actions[slice],
-            self.rewards[slice],
-            self.phi_primes[slice]
+            self.phis[ids],
+            self.actions[ids],
+            self.rewards[ids],
+            self.phis[phi_prime_ids]
         )
 
-if name == '__main__':
-    
+
+def test_iter():
+    n = 10
+    img_dims = (2, 2)
+    frames = 2
+    action_dims = 1
+    r = Replay(n, img_dims, frames, action_dims)
+
+    print 'Partially filling memory.'
+    mem_count = n-5
+    max_idx = mem_count - 1
+    for i in range(mem_count):
+        x, y = img_dims
+        phi = numpy.ones((x, y, frames))*i
+        action = i
+        reward = i
+        r.add(phi, action, reward)
+
+    print 'Testing sequential iteration when not full.'
+    iter = r.iterator(mode='sequential', batch_size=1)
+    for i, (phi, action, reward, phi_prime) in enumerate(iter):
+        if action >= max_idx:
+            import ipdb
+            ipdb.set_trace()
+
+    print 'Testing random iteration when not full.'
+    iter = r.iterator(mode='random_uniform', batch_size=1, num_batches=100)
+    for i, (phi, action, reward, phi_prime) in enumerate(iter):
+        if action >= max_idx:
+            import ipdb
+            ipdb.set_trace()
+
+    print 'Filling memory past capacity.'
+    r = Replay(n, img_dims, frames, action_dims)
+    for i in range(n + 3):
+        x, y = img_dims
+        phi = numpy.ones((x, y, frames))*i
+        action = i
+        reward = i
+        r.add(phi, action, reward)
+
+    print 'Testing overfull memory has been overwritten. With sequential iter.'
+    iter = r.iterator(mode='sequential', batch_size=1)
+    for i, (phi, action, reward, phi_prime) in enumerate(iter):
+        current_phi_prime = phi_prime[0][0][0][0]
+        if current_phi_prime == r.current_exp:
+            import ipdb
+            ipdb.set_trace()
+
+    print 'Testing overfull memory has been overwritten. With random iter.'
+    iter = r.iterator(mode='random_uniform', batch_size=1, num_batches=100)
+    for i, (phi, action, reward, phi_prime) in enumerate(iter):
+        current_phi_prime = phi_prime[0][0][0][0]
+        if current_phi_prime == r.current_exp:
+            import ipdb
+            ipdb.set_trace()
+
+    print 'Tests executed successfully.'
+
+if __name__ == '__main__':
+    test_iter()
