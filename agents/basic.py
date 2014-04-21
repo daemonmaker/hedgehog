@@ -16,8 +16,8 @@ from rlglue.agent import AgentLoader
 from rlglue.types import Action
 from rlglue.types import Observation
 from random import Random
-from pylearn2.datasets.replay import Replay
-import pylearn2.utils as utils
+from hedgehog.pylearn2.datasets.replay import Replay
+import hedgehog.pylearn2.utils as utils
 from theano import function
 import theano.tensor as T
 import ipdb
@@ -29,7 +29,7 @@ class basic_agent():
 
     def __init__(self, model_yaml, epsilon=0.1, k=4):
         # Validate and store parameters
-        assert(replay_data.__class__.__name__ == 'Replay')
+        #assert(replay_data.__class__.__name__ == 'Replay')
         self.model_yaml = model_yaml
         
         assert(epsilon>0 and epsilon<=1)
@@ -48,12 +48,14 @@ class basic_agent():
         self.frame_memory = col.deque(maxlen=self.k)
 
         # Compile action function
+        print 'BASIC AGENT: Compiling action function...'
         phi_eq = T.tensor4()
         r = T.fvector('r')
         gamma = T.fscalar('gamma')
         q_eq = self.model.fprop(phi_eq)
         action_eq = T.argmax(q_eq,axis=1)
         self.action = function([phi_eq], action_eq)
+        print 'BASIC AGENT: Done.'
 
     def get_frame(observation):
         image = utils.observation_to_image(observation, 128, (210, 160))/2
@@ -119,4 +121,4 @@ class basic_agent():
             return 'I don\'t understand'
 
 if __name__ == '__main__':
-    AgentLoader.loadAgent(Basic())
+    AgentLoader.loadAgent(basic_agent('/data/lisa/exp/tomlepaine/hedgehog/models/model_conv.yaml'))

@@ -3,18 +3,19 @@ Class for managing datasets created online.
 """
 __authors__ = ["Dustin Webb"]
 __copyright__ = "Copyright 2014, Universite de Montreal"
-__credits__ = ["Dustin Webb", "Thomas Paine"]
+__credits__ = ["Dustin Webb", "Tom Le Paine"]
 __license__ = "3-clause BSD"
 __maintainer__ = "Dustin Webb"
 __email__ = "webbd@iro"
 
 import numpy
+from pylearn2.utils import wraps
 from pylearn2.datasets import Dataset
 import ipdb
 
 
 class Replay(Dataset):
-    def __init__(total_size, img_dims, num_frames, action_dims):
+    def __init__(self, total_size, img_dims, num_frames, action_dims):
         """
         total_size : int
             The total number of records to retain.
@@ -30,7 +31,7 @@ class Replay(Dataset):
         self.total_size = total_size
 
         assert(
-            len(img_dims.shape) == 2 and
+            len(img_dims) == 2 and
             img_dims[0] > 0 and
             img_dims[1] > 0
         )
@@ -50,7 +51,7 @@ class Replay(Dataset):
             (total_size, img_dims[0], img_dims[1], num_frames)
         )
         self.actions = numpy.zeros((total_size, action_dims))
-        self.rewards = numpy.zeros(total_size, 1)
+        self.rewards = numpy.zeros((total_size, 1))
 
         # Setup ring
         self.current_exp = 0
@@ -58,8 +59,7 @@ class Replay(Dataset):
 
     def add(phi, action, reward, phi_prime):
         """
-        exp : tuple
-            4-tuple containing phi_t, a_t, r_t, phi_{t+1}
+        phi_t, a_t, r_t, phi_{t+1}
         """
         self.phis[self.current_exp, :] = phi
         self.actions[self.current_exp, :] = action
@@ -127,5 +127,5 @@ class Replay(Dataset):
             self.phi_primes[slice]
         )
 
-if name == '__main__':
-    
+if __name__ == '__main__':
+    pass
