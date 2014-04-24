@@ -8,7 +8,7 @@ __license__ = "3-clause BSD"
 __maintainer__ = "Dustin Webb"
 __email__ = "webbd@iro"
 
-import numpy
+import numpy as np
 from pylearn2.utils import wraps
 from pylearn2.datasets import Dataset
 import pylearn2.utils.iteration as iteration
@@ -46,12 +46,12 @@ class Replay(Dataset):
         self.action_dims = action_dims
 
         # Allocate memory
-        self.phis = numpy.zeros(
+        self.phis = np.zeros(
             (total_size, img_dims[0], img_dims[1], num_frames)
         )
-        self.actions = numpy.zeros((total_size, action_dims))
-        self.rewards = numpy.zeros((total_size, 1))
-        self.idxs = numpy.arange(total_size)
+        self.actions = np.zeros((total_size, action_dims))
+        self.rewards = np.zeros((total_size, 1))
+        self.idxs = np.arange(total_size)
 
         # Setup ring
         self.current_exp = 0
@@ -131,10 +131,10 @@ class Replay(Dataset):
         phi_prime_ids = (ids+1) % self.total_size
 
         return (
-            self.phis[ids],
+            self.phis[ids].astype(np.float32),
             self.actions[ids],
             self.rewards[ids],
-            self.phis[phi_prime_ids]
+            self.phis[phi_prime_ids].astype(np.float32)
         )
 
 
@@ -150,7 +150,7 @@ def test_iter():
     max_idx = mem_count - 1
     for i in range(mem_count):
         x, y = img_dims
-        phi = numpy.ones((x, y, frames))*i
+        phi = np.ones((x, y, frames))*i
         action = i
         reward = i
         r.add(phi, action, reward)
@@ -173,7 +173,7 @@ def test_iter():
     r = Replay(n, img_dims, frames, action_dims)
     for i in range(n + 3):
         x, y = img_dims
-        phi = numpy.ones((x, y, frames))*i
+        phi = np.ones((x, y, frames))*i
         action = i
         reward = i
         r.add(phi, action, reward)
