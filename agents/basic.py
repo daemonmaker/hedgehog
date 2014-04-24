@@ -21,33 +21,95 @@ from rlglue.types import Observation
 from random import Random
 from hedgehog.pylearn2.datasets.replay import Replay
 import hedgehog.pylearn2.utils as utils
+from pylearn2.train import Train
+from pylearn2.training_algorithms.sgd import SGD
 from theano import function
 import theano.tensor as T
 import ipdb
 
 
-class basic_agent():
+def setup():
+    N = 100  # The paper keeps 1000000 memories
+    num_frames = 3  # Prescribed by paper
+    img_dims = (84, 84)  # Prescribed by paper
+    action_dims = 18  # Prescribed by ALE
+    batch_size = 32
+    learning_rate = 1e-2
+    batches_per_iter = 1  # How many batches to pull from memory
+
+    model_yaml = '/data/lisa/exp/tomlepaine/hedgehog/models/model_conv.yaml'
+    model = utils.load_yaml_template(model_yaml)
+
+    dataset = Replay(N, img_dims, num_frames, action_dims)
+
+    monitoring_dataset = {}
+    monitoring_dataset['train'] = dataset
+
+    algo = SGD(
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        batches_per_iter=batches_per_iter,
+        monitoring_dataset=monitoring_dataset
+    )
+
+    train = Train(dataset=dataset, model=model, algorithm=algo)
+
+    view = DeepMindPreprocessor(img_dims)
+
+    return BasicAgent(model, dataset, train, view)
+
+
+class DeepMindPreprocessor():
+    def __init__(self, img_dims):
+        assert(type(img_dims) == tuple and len(img_dims) == 2)
+        self.reward = 0  # Accumulator for reward values
+        self.img_dims = img_dims
+        self.offset = 128  # Start of image in observation
+        self.atair_frame_size = (210, 160)
+        self.reduced_frame_size = (110, 84)  # Prescribed by paper
+        self.crop_start = (20, 0)  # Crop start prescribed by authors
+
+    def get_frame(self, observation):
+        #  TODO confirm this does a deep copy
+        image = utils.observation_to_image(
+            observation,
+            self.offset,
+            self.atari_frame_size
+        )
+        image /= 2  # Calculate idxs into Atari 2600 pallete
+        image = utils.resize_image(image, self.reduced_frame_size)
+        image = utils.crop_image(image, self.crop_start, self.img_dims)
+        return image
+
+
+class BasicAgent():
     lastAction = Action()
     lastObservation = Observation()
 
-    def __init__(self, model_yaml, epsilon=0.1, k=4):
+    def __init__(self, model, dataset, train, view, epsilon=0.1, k=4):
         # Validate and store parameters
-        #assert(replay_data.__class__.__name__ == 'Replay')
-        self.model_yaml = model_yaml
-        
-        assert(epsilon>0 and epsilon<=1)
+        assert(model)
+        self.model = model
+
+        assert(dataset)
+        self.dataset = dataset
+
+        assert(train)
+        self.train = train
+
+        assert(view)
+        self.view = view
+
+        assert(epsilon > 0 and epsilon <= 1)
         self.epsilon = epsilon
 
-        assert(k>0)
+        assert(k > 0)
         self.k = k
-        
-        # Load model yaml
-        self.model = utils.load_yaml_template(model_yaml)
 
-        # Set counter
+        # Init counter
         self.action_count = 0
-        
-        # Set frame memory
+
+        # Init frame memory
         self.frame_memory = col.deque(maxlen=self.k)
 
         # Compile action function
@@ -56,16 +118,9 @@ class basic_agent():
         r = T.fvector('r')
         gamma = T.fscalar('gamma')
         q_eq = self.model.fprop(phi_eq)
-        action_eq = T.argmax(q_eq,axis=1)
+        action_eq = T.argmax(q_eq, axis=1)
         self.action = function([phi_eq], action_eq)
         print 'BASIC AGENT: Done.'
-
-    def get_frame(self, observation):
-        image = utils.observation_to_image(observation, 128, (210, 160))/2
-        image = utils.resize_image(image, (110, 84))
-        image = utils.crop_image(image, (20, 0), (84, 84))
-        image = image.astype(np.float32)
-        return image
 
     def agent_init(self, taskSpec):
         self.lastAction = Action()
@@ -74,45 +129,53 @@ class basic_agent():
     def agent_start(self, observation):
         print 'BASIC AGENT: start'
         # Generate random action, one-hot binary vector
-        action = self.random_action()
+        action = self.select_action()
 
         self.lastAction = copy.deepcopy(action)
         self.lastObservation = copy.deepcopy(observation)
 
         self.action_count += 1
-        frame = self.get_frame(observation)
+        frame = self.view.get_frame(observation)
         self.frame_memory.append(frame)
         return action
 
-    def random_action(self, phi=None):
-        action = Action()
-        action.intArray = [0]*18
-        if (np.random.rand() > self.epsilon) and phi:
-            #print 'q action...'
-            phi = np.array(phi)[:,:,:,None]
-            phi = np.tile(phi, (1,1,1,128))
-            action_int = self.action(phi)[0]
-            action.intArray[action_int] = 1
-        else:
-            action.intArray[np.random.randint(0, 18)] = 1
-
-        return action
+    def select_action(self, phi=None):
+        if self.action_count % self.k == 0:
+            action = Action()
+            action.intArray = [0]*18
+            if (np.random.rand() > self.epsilon) and phi:
+                # Get action from Q-function
+                #print 'q action...'
+                phi = np.array(phi)[:, :, :, None]
+                phi = np.tile(phi, (1, 1, 1, 128))
+                action_int = self.action(phi)[0]
+                action.intArray[action_int] = 1
+            else:
+                # Get random action
+                action.intArray[np.random.randint(0, 18)] = 1
+            self.action = action
 
     def agent_step(self, reward, observation):
+        self.reward += reward
+
         #print 'BASIC AGENT: step'
-        frame = self.get_frame(observation)
+        frame = self.view.get_frame(observation)
         self.frame_memory.append(frame)
 
         if self.action_count % self.k == 0:
-            action = self.random_action(self.frame_memory)
-        else:
-            action = self.lastAction
+            ipdb.set_trace()
+            #  Create a new phi
+            #  Reset reward to 0
+            self.dataset.add(self.phi, self.action, self.reward)
 
-        #self.lastAction = copy.deepcopy(action)
-        self.lastObservation = copy.deepcopy(observation)
+            self.reward = 0
+            self.phi = self.frame_memory.get()
 
-        self.action_count +=1
-        return action
+        self.select_action(self.frame_memory)
+
+        self.action_count += 1
+
+        return self.action
 
     def agent_end(self, reward):
         # TODO What do we do with the reward?
@@ -127,5 +190,23 @@ class basic_agent():
         else:
             return 'I don\'t understand'
 
+
+def test_agent_step():
+    color_range = 128
+    size_of_observation = 128+210*160
+
+    agent = setup()
+
+    for i in range(16):
+        reward = float(i)
+        color = i
+        observation = Observation()
+        observation.intArray = np.ones(size_of_observation, dtype=np.int8)
+        observation.intArray *= color
+
+        agent.agent_step(reward, observation)
+
+
 if __name__ == '__main__':
-    AgentLoader.loadAgent(basic_agent('/data/lisa/exp/tomlepaine/hedgehog/models/model_conv.yaml'))
+    agent = setup()
+    AgentLoader.loadAgent(agent)
