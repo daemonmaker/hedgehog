@@ -47,7 +47,7 @@ class Replay(Dataset):
 
         # Allocate memory
         self.phis = np.zeros(
-            (total_size, img_dims[0], img_dims[1], num_frames)
+            (total_size, num_frames, img_dims[0], img_dims[1])
         )
         self.actions = np.zeros((total_size, action_dims))
         self.rewards = np.zeros((total_size, 1))
@@ -77,7 +77,8 @@ class Replay(Dataset):
 
     @wraps(Dataset.iterator)
     def iterator(self, mode=None, batch_size=None, num_batches=None,
-                 topo=None, targets=False, rng=None):
+                 topo=None, targets=False, rng=None,
+                 data_specs=None, return_tuple=False):
         # Store parameters for diagnostic purposes
         self.mode = mode
         self.batch_size = batch_size
@@ -136,6 +137,9 @@ class Replay(Dataset):
             self.rewards[ids],
             self.phis[phi_prime_ids].astype(np.float32)
         )
+
+    def get_design_matrix(self, topo=None):
+        return self.phis
 
 
 def test_iter():

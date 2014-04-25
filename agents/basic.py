@@ -29,15 +29,15 @@ import ipdb
 
 
 def setup():
-    N = 100  # The paper keeps 1000000 memories
-    num_frames = 3  # Prescribed by paper
+    N = 1024  # The paper keeps 1000000 memories
+    num_frames = 4  # Prescribed by paper
     img_dims = (84, 84)  # Prescribed by paper
     action_dims = 18  # Prescribed by ALE
     batch_size = 32
     learning_rate = 1e-2
     batches_per_iter = 1  # How many batches to pull from memory
 
-    model_yaml = '/data/lisa/exp/tomlepaine/hedgehog/models/model_conv.yaml'
+    model_yaml = '../models/model_conv.yaml'
     model = utils.load_yaml_template(model_yaml)
 
     dataset = Replay(N, img_dims, num_frames, action_dims)
@@ -56,16 +56,15 @@ def setup():
 
     view = DeepMindPreprocessor(img_dims)
 
-    return BasicAgent(model, dataset, train, view)
+    return BasicAgent(model, dataset, train, view, k=num_frames)
 
 
 class DeepMindPreprocessor():
     def __init__(self, img_dims):
         assert(type(img_dims) == tuple and len(img_dims) == 2)
-        self.reward = 0  # Accumulator for reward values
         self.img_dims = img_dims
         self.offset = 128  # Start of image in observation
-        self.atair_frame_size = (210, 160)
+        self.atari_frame_size = (210, 160)
         self.reduced_frame_size = (110, 84)  # Prescribed by paper
         self.crop_start = (20, 0)  # Crop start prescribed by authors
 
@@ -106,8 +105,9 @@ class BasicAgent():
         assert(k > 0)
         self.k = k
 
-        # Init counter
+    # Init helper member variables
         self.action_count = 0
+        self.reward = 0  # Accumulator for reward values
 
         # Init frame memory
         self.frame_memory = col.deque(maxlen=self.k)
@@ -119,7 +119,7 @@ class BasicAgent():
         gamma = T.fscalar('gamma')
         q_eq = self.model.fprop(phi_eq)
         action_eq = T.argmax(q_eq, axis=1)
-        self.action = function([phi_eq], action_eq)
+        self.action_func = function([phi_eq], action_eq)
         print 'BASIC AGENT: Done.'
 
     def agent_init(self, taskSpec):
@@ -129,15 +129,12 @@ class BasicAgent():
     def agent_start(self, observation):
         print 'BASIC AGENT: start'
         # Generate random action, one-hot binary vector
-        action = self.select_action()
-
-        self.lastAction = copy.deepcopy(action)
-        self.lastObservation = copy.deepcopy(observation)
+        self.select_action()
 
         self.action_count += 1
         frame = self.view.get_frame(observation)
         self.frame_memory.append(frame)
-        return action
+        return self.action
 
     def select_action(self, phi=None):
         if self.action_count % self.k == 0:
@@ -147,8 +144,7 @@ class BasicAgent():
                 # Get action from Q-function
                 #print 'q action...'
                 phi = np.array(phi)[:, :, :, None]
-                phi = np.tile(phi, (1, 1, 1, 128))
-                action_int = self.action(phi)[0]
+                action_int = self.action_func(phi)[0]
                 action.intArray[action_int] = 1
             else:
                 # Get random action
@@ -162,14 +158,22 @@ class BasicAgent():
         frame = self.view.get_frame(observation)
         self.frame_memory.append(frame)
 
-        if self.action_count % self.k == 0:
-            ipdb.set_trace()
+        if self.action_count == self.k:
+            self.reward = 0
+            self.phi = np.array(self.frame_memory)
+
+        elif self.action_count % self.k == 0:
             #  Create a new phi
             #  Reset reward to 0
-            self.dataset.add(self.phi, self.action, self.reward)
+            print 'self.action: ' + str(self.action.intArray)
+            self.dataset.add(self.phi, self.action.intArray, self.reward)
 
             self.reward = 0
-            self.phi = self.frame_memory.get()
+            self.phi = np.array(self.frame_memory)
+
+            if self.action_count >= (self.train.algorithm.batch_size*self.k+1):
+                ipdb.set_trace()
+                self.train.main_loop()
 
         self.select_action(self.frame_memory)
 
@@ -197,15 +201,22 @@ def test_agent_step():
 
     agent = setup()
 
-    for i in range(16):
+    color = 1
+    observation = Observation()
+    observation.intArray = np.ones(size_of_observation, dtype=np.uint8)
+    observation.intArray *= color
+    agent.agent_start(observation)
+
+    for i in range(2, 257):
         reward = float(i)
         color = i
         observation = Observation()
-        observation.intArray = np.ones(size_of_observation, dtype=np.int8)
+        observation.intArray = np.ones(size_of_observation, dtype=np.uint8)
         observation.intArray *= color
 
         agent.agent_step(reward, observation)
 
+    ipdb.set_trace()
 
 if __name__ == '__main__':
     agent = setup()
