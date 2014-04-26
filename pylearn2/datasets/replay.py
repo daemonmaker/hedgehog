@@ -13,9 +13,12 @@ from pylearn2.utils import wraps
 from pylearn2.datasets import Dataset
 import pylearn2.utils.iteration as iteration
 import ipdb
+import theano
 
 
 class Replay(Dataset):
+    #self.stochastic = False
+
     def __init__(self, total_size, img_dims, num_frames, action_dims):
         """
         total_size : int
@@ -47,10 +50,14 @@ class Replay(Dataset):
 
         # Allocate memory
         self.phis = np.zeros(
-            (total_size, num_frames, img_dims[0], img_dims[1])
+            (total_size, num_frames, img_dims[0], img_dims[1]),
+            dtype=theano.config.floatX
         )
-        self.actions = np.zeros((total_size, action_dims))
-        self.rewards = np.zeros((total_size, 1))
+        self.actions = np.zeros(
+            (total_size, action_dims),
+            dtype=theano.config.floatX
+        )
+        self.rewards = np.zeros((total_size, 1), dtype=theano.config.floatX)
         self.idxs = np.arange(total_size)
 
         # Setup ring
@@ -77,8 +84,7 @@ class Replay(Dataset):
 
     @wraps(Dataset.iterator)
     def iterator(self, mode=None, batch_size=None, num_batches=None,
-                 topo=None, targets=False, rng=None,
-                 data_specs=None, return_tuple=False):
+                 topo=None, targets=False, rng=None):
         # Store parameters for diagnostic purposes
         self.mode = mode
         self.batch_size = batch_size
@@ -93,30 +99,40 @@ class Replay(Dataset):
         total_size -= 1
 
         # Setup iterator
-        if mode == 'sequential' or mode == 'random_uniform':
-            # mode is sequential
-            if mode == 'sequential':
-                self.iter = iteration.SequentialSubsetIterator(
-                    total_size,
-                    batch_size,
-                    num_batches,
-                    rng=None
-                )
+        if mode == 'sequential':
+            self.iter = iteration.SequentialSubsetIterator(
+                total_size,
+                batch_size,
+                num_batches,
+                rng=None
+            )
 
-            # mode is random uniform
-            else:
-                self.iter = iteration.RandomUniformSubsetIterator(
-                    total_size,
-                    batch_size,
-                    num_batches,
-                    rng
-                )
-
-            return self
+        elif mode == 'shuffled_sequential':
+            self.iter = iteration.ShuffledSequentialSubsetIterator(
+                total_size,
+                batch_size,
+                num_batches,
+                rng=rng
+            )
+        elif mode == 'random_slice':
+            self.iter = iteration.RandomSliceSubsetIterator(
+                total_size,
+                batch_size,
+                num_batches,
+                rng=rng
+            )
+        elif mode == 'random_uniform':
+            self.iter = iteration.RandomUniformSubsetIterator(
+                total_size,
+                batch_size,
+                num_batches,
+                rng
+            )
 
         else:
-            raise NotImplementedError("Iteration mode '" +
-                                      mode + "' not supported.")
+            raise Exception("Unknown iteration mode.")
+
+        return self
 
     @wraps(Dataset.__iter__)
     def __iter__(self):
@@ -138,6 +154,8 @@ class Replay(Dataset):
             self.phis[phi_prime_ids].astype(np.float32)
         )
 
+    # TODO Remove this when dataset contract is corrected. Currently it is not
+    # required but is required by FiniteDatasetIterator.
     def get_design_matrix(self, topo=None):
         return self.phis
 

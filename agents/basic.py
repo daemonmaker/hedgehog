@@ -25,6 +25,8 @@ from pylearn2.train import Train
 from pylearn2.training_algorithms.sgd import SGD
 from theano import function
 import theano.tensor as T
+from pylearn2.datasets import Dataset
+from pylearn2.utils import wraps
 import ipdb
 
 
@@ -36,27 +38,36 @@ def setup():
     batch_size = 32
     learning_rate = 1e-2
     batches_per_iter = 1  # How many batches to pull from memory
+    discount_factor = 0.01
 
     model_yaml = '../models/model_conv.yaml'
     model = utils.load_yaml_template(model_yaml)
 
     dataset = Replay(N, img_dims, num_frames, action_dims)
 
-    monitoring_dataset = {}
-    monitoring_dataset['train'] = dataset
+    #monitoring_dataset = {}
+    #monitoring_dataset['train'] = dataset
 
     algo = SGD(
         batch_size=batch_size,
         learning_rate=learning_rate,
         batches_per_iter=batches_per_iter,
-        monitoring_dataset=monitoring_dataset
+        #monitoring_dataset=monitoring_dataset
+        monitoring_dataset=None
     )
 
-    train = Train(dataset=dataset, model=model, algorithm=algo)
+    train = Train(dataset=None, model=model, algorithm=algo)
 
     view = DeepMindPreprocessor(img_dims)
 
-    return BasicAgent(model, dataset, train, view, k=num_frames)
+    return BasicAgent(
+        model,
+        dataset,
+        train,
+        view,
+        discount_factor=discount_factor,
+        k=num_frames
+    )
 
 
 class DeepMindPreprocessor():
@@ -85,7 +96,8 @@ class BasicAgent():
     lastAction = Action()
     lastObservation = Observation()
 
-    def __init__(self, model, dataset, train, view, epsilon=0.1, k=4):
+    def __init__(self, model, dataset, train, view,
+                 discount_factor=0.1, epsilon=0.1, k=4):
         # Validate and store parameters
         assert(model)
         self.model = model
@@ -99,13 +111,20 @@ class BasicAgent():
         assert(view)
         self.view = view
 
+        assert(discount_factor > 0)
+        if (discount_factor >= 1):
+            print "WARNING: Discount factor >= 1, learning may diverge."
+        self.discount_factor = discount_factor
+
         assert(epsilon > 0 and epsilon <= 1)
         self.epsilon = epsilon
 
         assert(k > 0)
         self.k = k
 
-    # Init helper member variables
+        self.train.dataset = self
+
+        # Init helper member variables
         self.action_count = 0
         self.reward = 0  # Accumulator for reward values
 
@@ -115,11 +134,18 @@ class BasicAgent():
         # Compile action function
         print 'BASIC AGENT: Compiling action function...'
         phi_eq = T.tensor4()
-        r = T.fvector('r')
-        gamma = T.fscalar('gamma')
         q_eq = self.model.fprop(phi_eq)
         action_eq = T.argmax(q_eq, axis=1)
         self.action_func = function([phi_eq], action_eq)
+        print 'BASIC AGENT: Done.'
+
+        # Compile maximum action function
+        print 'BASIC AGENT: Compiling y function...'
+        max_action_eq = T.max(q_eq, axis=1)
+        r = T.fvector('r')
+        gamma = T.fscalar('gamma')
+        y = r + gamma*max_action_eq
+        self.y_func = function([r, gamma, phi_eq], y)
         print 'BASIC AGENT: Done.'
 
     def agent_init(self, taskSpec):
@@ -129,14 +155,14 @@ class BasicAgent():
     def agent_start(self, observation):
         print 'BASIC AGENT: start'
         # Generate random action, one-hot binary vector
-        self.select_action()
+        self._select_action()
 
         self.action_count += 1
         frame = self.view.get_frame(observation)
         self.frame_memory.append(frame)
         return self.action
 
-    def select_action(self, phi=None):
+    def _select_action(self, phi=None):
         if self.action_count % self.k == 0:
             action = Action()
             action.intArray = [0]*18
@@ -165,21 +191,47 @@ class BasicAgent():
         elif self.action_count % self.k == 0:
             #  Create a new phi
             #  Reset reward to 0
-            print 'self.action: ' + str(self.action.intArray)
             self.dataset.add(self.phi, self.action.intArray, self.reward)
 
             self.reward = 0
             self.phi = np.array(self.frame_memory)
 
-            if self.action_count >= (self.train.algorithm.batch_size*self.k+1):
-                ipdb.set_trace()
-                self.train.main_loop()
-
-        self.select_action(self.frame_memory)
+        self._select_action(self.frame_memory)
 
         self.action_count += 1
 
         return self.action
+
+    def agent_train(self, terminal):
+        if self.action_count >= (self.train.algorithm.batch_size*self.k+1):
+            ipdb.set_trace()
+            self.train.main_loop()
+
+    @wraps(Dataset.__iter__)
+    def __iter__(self):
+        return self
+
+    @wraps(Dataset.iterator)
+    def iterator(self, mode=None, batch_size=None, num_batches=None,
+                 topo=None, targets=False, rng=None,
+                 # TODO Remove following options when dataset contract is
+                 # corrected. Currently they are not required but is required
+                 # by FiniteDatasetIterator.
+                 data_specs=None, return_tuple=False):
+        self.replay = self.dataset.iterator(
+            mode,
+            batch_size,
+            num_batches,
+            topo,
+            targets,
+            rng
+        )
+        return self
+
+    def next(self):
+        phi, action, reward, phi_prime = self.replay.next()
+        y = self.y_func(reward, self.discount_factor, phi_prime)
+        return (phi, y)
 
     def agent_end(self, reward):
         # TODO What do we do with the reward?
@@ -206,8 +258,9 @@ def test_agent_step():
     observation.intArray = np.ones(size_of_observation, dtype=np.uint8)
     observation.intArray *= color
     agent.agent_start(observation)
+    agent.agent_train(False)
 
-    for i in range(2, 257):
+    for i in range(2, 256):
         reward = float(i)
         color = i
         observation = Observation()
@@ -215,6 +268,16 @@ def test_agent_step():
         observation.intArray *= color
 
         agent.agent_step(reward, observation)
+
+    reward = float(i)
+    color = i
+    observation = Observation()
+    observation.intArray = np.ones(size_of_observation, dtype=np.uint8)
+    observation.intArray *= color
+
+    agent.agent_step(reward, observation)
+
+    agent.agent_train(False)
 
     ipdb.set_trace()
 
