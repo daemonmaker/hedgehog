@@ -204,7 +204,6 @@ class BasicAgent():
 
     def agent_train(self, terminal):
         if self.action_count >= (self.train.algorithm.batch_size*self.k+1):
-            ipdb.set_trace()
             self.train.main_loop()
 
     @wraps(Dataset.__iter__)
@@ -230,8 +229,9 @@ class BasicAgent():
 
     def next(self):
         phi, action, reward, phi_prime = self.replay.next()
-        y = self.y_func(reward, self.discount_factor, phi_prime)
-        return (phi, y)
+        y = self.y_func(reward, self.discount_factor, phi_prime)[:, None]
+        a_one_hot = np.zeros(action.shape)
+        return (phi, a_one_hot, y)
 
     def agent_end(self, reward):
         # TODO What do we do with the reward?

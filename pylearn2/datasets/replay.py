@@ -50,7 +50,7 @@ class Replay(Dataset):
 
         # Allocate memory
         self.phis = np.zeros(
-            (total_size, num_frames, img_dims[0], img_dims[1]),
+            (num_frames, img_dims[0], img_dims[1], total_size),
             dtype=theano.config.floatX
         )
         self.actions = np.zeros(
@@ -71,7 +71,7 @@ class Replay(Dataset):
         """
         phi_t, a_t, r_t, phi_{t+1}
         """
-        self.phis[self.current_exp, :] = phi
+        self.phis[:, :, :, self.current_exp] = phi
         self.actions[self.current_exp, :] = action
         self.rewards[self.current_exp, :] = reward
 
@@ -148,10 +148,10 @@ class Replay(Dataset):
         phi_prime_ids = (ids+1) % self.total_size
 
         return (
-            self.phis[ids].astype(np.float32),
+            self.phis[:, :, :, ids].astype(np.float32),
             self.actions[ids],
-            self.rewards[ids],
-            self.phis[phi_prime_ids].astype(np.float32)
+            self.rewards[ids].flatten(),
+            self.phis[:, :, :, phi_prime_ids].astype(np.float32)
         )
 
     # TODO Remove this when dataset contract is corrected. Currently it is not
