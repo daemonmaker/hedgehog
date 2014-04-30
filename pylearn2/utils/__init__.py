@@ -31,8 +31,8 @@ def apply_palette(image, palette):
 def rgb_to_grey(image):
     return np.sqrt(image**2,axis=2)
 
-def resize_image(image, size):
-    return misc.imresize(image, size=size)
+def resize_image(image, size, mode=None):
+    return misc.imresize(image, size=size, mode=mode)
 
 def crop_image(image, start, size):
     return image[start[0]:start[0]+size[0],start[1]:start[1]+size[1]]

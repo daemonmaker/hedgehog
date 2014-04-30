@@ -19,35 +19,23 @@
 import sys
 import rlglue.RLGlue as RLGlue
 
+whichEpisode = 0
+
+
+def runEpisode(stepLimit):
+    global whichEpisode
+    terminal = RLGlue.RL_episode(stepLimit)
+    totalSteps = RLGlue.RL_num_steps()
+    totalReward = RLGlue.RL_return()
+
+    print "Episode " + str(whichEpisode) + "\t " + str(totalSteps) + " steps \t" + str(totalReward) + " total reward\t " + str(terminal) + " natural end"
+
+    whichEpisode = whichEpisode+1
+
+
 print "\n\n----------Stepping through an episode----------"
 #We could also start over and do another experiment */
 taskSpec = RLGlue.RL_init()
 
-#We could run one step at a time instead of one episode at a time */
-#Start the episode */
-startResponse = RLGlue.RL_start()
-
-print startResponse.__dict__.keys()
-
-#firstObservation = startResponse.o.intArray[0]
-#firstAction = startResponse.a.intArray[0]
-
-stepResponse = RLGlue.RL_step()
-#print type(stepResponse.a)
-#print type(stepResponse.o)
-#print type(stepResponse.r)
-print stepResponse.a.intArray.shape
-print stepResponse.o.intArray.shape
-print stepResponse.r
-
-#Run until the episode ends*/
-while (stepResponse.terminal != 1):
-    stepResponse = RLGlue.RL_step()
-    print stepResponse.r
-
-print "\n\n----------Summary----------"
-
-totalSteps = RLGlue.RL_num_steps()
-totalReward = RLGlue.RL_return()
-print "It ran for " + str(totalSteps) + " steps, total reward was: " + str(totalReward)
-RLGlue.RL_cleanup()
+for i in range(50):
+    runEpisode(100000)

@@ -1,4 +1,5 @@
-!obj:pylearn2.models.mlp.MLP {
+!obj:hedgehog.pylearn2.models.mlp.RLMLP {
+    action_dims: %(action_dims)d,
     batch_size: 32,
     layers: [
              !obj:pylearn2.models.maxout.MaxoutConvC01B {
@@ -8,13 +9,15 @@
                  W_lr_scale: .05,
                  b_lr_scale: .05,
                  num_channels: 16,
-                 num_pieces: 2,
+                 num_pieces: 1,
                  kernel_shape: [8, 8],
-                 pool_shape: [4, 4],
-                 pool_stride: [4, 4],
+                 kernel_stride: [4, 4],
+                 pool_shape: [1, 1],
+                 pool_stride: [1, 1],
                  irange: .005,
                  max_kernel_norm: .9,
-                 partial_sum: 33,
+                 partial_sum: 1,
+                 min_zero: 1,
              },
              !obj:pylearn2.models.maxout.MaxoutConvC01B {
                  layer_name: 'h1',
@@ -23,13 +26,15 @@
                  W_lr_scale: .05,
                  b_lr_scale: .05,
                  num_channels: 32,
-                 num_pieces: 2,
+                 num_pieces: 1,
                  kernel_shape: [4, 4],
-                 pool_shape: [4, 4],
-                 pool_stride: [2, 2],
+                 kernel_stride: [2, 2],
+                 pool_shape: [1, 1],
+                 pool_stride: [1, 1],
                  irange: .005,
                  max_kernel_norm: 1.9365,
-                 partial_sum: 15,
+                 partial_sum: 1,
+                 min_zero: 1,
              },
              !obj:pylearn2.models.mlp.RectifiedLinear {
                  max_col_norm: 1.9365,
@@ -40,13 +45,13 @@
              !obj:pylearn2.models.mlp.Linear {
                  max_col_norm: 1.9365,
                  layer_name: 'y',
-                 dim: 18,
+                 dim: %(action_dims)d,
                  irange: .005
              }
             ],
     input_space: !obj:pylearn2.space.Conv2DSpace {
         shape: &window_shape [84, 84],
-        num_channels: 4,
+        num_channels: %(num_channels)d,
         axes: ['c', 0, 1, 'b'],
     }
 }

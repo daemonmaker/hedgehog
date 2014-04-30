@@ -14,6 +14,7 @@ import copy
 
 import numpy as np
 
+import theano
 from rlglue.agent.Agent import Agent
 from rlglue.agent import AgentLoader
 from rlglue.types import Action
@@ -27,44 +28,73 @@ from theano import function
 import theano.tensor as T
 from pylearn2.datasets import Dataset
 from pylearn2.utils import wraps
+import hedgehog.pylearn2.costs.action as ActionCost
+from pylearn2.termination_criteria import EpochCounter
+import Image
+import cPickle
 import ipdb
 
 
 def setup():
     N = 1024  # The paper keeps 1000000 memories
-    num_frames = 4  # Prescribed by paper
+    num_frames = 3  # Prescribed by paper
     img_dims = (84, 84)  # Prescribed by paper
-    action_dims = 18  # Prescribed by ALE
+    action_dims = 4  # Prescribed by ALE
     batch_size = 32
     learning_rate = 1e-2
     batches_per_iter = 1  # How many batches to pull from memory
     discount_factor = 0.01
 
-    model_yaml = '../models/model_conv.yaml'
-    model = utils.load_yaml_template(model_yaml)
+    print "Creating action cost."
+    action_cost = ActionCost.Action()
 
+    print "Loading model yaml."
+    model_yaml = '../models/model_conv.yaml'
+    yaml_params = {
+        'num_channels': num_frames,
+        'action_dims': action_dims,
+    }
+    model = utils.load_yaml_template(model_yaml, yaml_params)
+
+    print "Creating dataset."
     dataset = Replay(N, img_dims, num_frames, action_dims)
 
     #monitoring_dataset = {}
     #monitoring_dataset['train'] = dataset
 
+    print "Creating terminiation criterion."
+    termination_criterion = EpochCounter(1)
+
+    print "Creating training algorithm."
     algo = SGD(
         batch_size=batch_size,
         learning_rate=learning_rate,
         batches_per_iter=batches_per_iter,
         #monitoring_dataset=monitoring_dataset
-        monitoring_dataset=None
+        monitoring_dataset=None,
+        cost=action_cost,
+        termination_criterion=termination_criterion
     )
 
+    print "Creating training object."
     train = Train(dataset=None, model=model, algorithm=algo)
 
+    print "Creating view."
     view = DeepMindPreprocessor(img_dims)
 
+    print "Creating agent."
+    action_map = {
+        0: 0,
+        1: 1,
+        2: 3,
+        3: 4,
+    }
     return BasicAgent(
         model,
         dataset,
         train,
         view,
+        action_map,
         discount_factor=discount_factor,
         k=num_frames
     )
@@ -79,6 +109,11 @@ class DeepMindPreprocessor():
         self.reduced_frame_size = (110, 84)  # Prescribed by paper
         self.crop_start = (20, 0)  # Crop start prescribed by authors
 
+        print "Loading palette."
+        self.palette = cPickle.load(open('../stella_palette.pkl', 'rb'))
+
+        self.frame_count = 0
+
     def get_frame(self, observation):
         #  TODO confirm this does a deep copy
         image = utils.observation_to_image(
@@ -87,17 +122,30 @@ class DeepMindPreprocessor():
             self.atari_frame_size
         )
         image /= 2  # Calculate idxs into Atari 2600 pallete
+
+        # Write out frame
+        image = self.palette[image]
+        img_obj = Image.fromarray(image)
+        frame = "/Tmp/webbd/drl/frame_%05d.png" % self.frame_count
+        self.frame_count += 1
+        img_obj.save(open(frame, 'w'))
+
+        # Resize and crop
+        image = np.sqrt(np.sum((image**2), axis=2))
+        image = image.astype(np.uint8)
         image = utils.resize_image(image, self.reduced_frame_size)
         image = utils.crop_image(image, self.crop_start, self.img_dims)
+
         return image
 
 
 class BasicAgent():
     lastAction = Action()
     lastObservation = Observation()
+    total_reward = 0
 
-    def __init__(self, model, dataset, train, view,
-                 discount_factor=0.1, epsilon=0.1, k=4):
+    def __init__(self, model, dataset, train, view, action_map,
+                 discount_factor=0.8, epsilon=0.6, k=4):
         # Validate and store parameters
         assert(model)
         self.model = model
@@ -110,6 +158,9 @@ class BasicAgent():
 
         assert(view)
         self.view = view
+
+        assert(action_map and type(action_map) == dict)
+        self.action_map = action_map
 
         assert(discount_factor > 0)
         if (discount_factor >= 1):
@@ -164,21 +215,32 @@ class BasicAgent():
 
     def _select_action(self, phi=None):
         if self.action_count % self.k == 0:
-            action = Action()
-            action.intArray = [0]*18
             if (np.random.rand() > self.epsilon) and phi:
                 # Get action from Q-function
                 #print 'q action...'
                 phi = np.array(phi)[:, :, :, None]
                 action_int = self.action_func(phi)[0]
-                action.intArray[action_int] = 1
             else:
                 # Get random action
-                action.intArray[np.random.randint(0, 18)] = 1
+                action_int = np.random.randint(0, len(self.action_map))
+
+            self.cmd = [0]*len(self.action_map)
+            self.cmd[action_int] = 1
+
+            # Map cmd to ALE action
+            # 18 is the number of commands ALE accepts
+            action = Action()
+            #action.intArray = [0]*18
+            #action.intArray[self.action_map[action_int]] = 1
+            action.intArray = [self.action_map[action_int]]
             self.action = action
 
     def agent_step(self, reward, observation):
         self.reward += reward
+        self.total_reward += reward
+
+        if self.action_count % 100:
+            print "self.total_reward: %d" % self.total_reward
 
         #print 'BASIC AGENT: step'
         frame = self.view.get_frame(observation)
@@ -191,18 +253,23 @@ class BasicAgent():
         elif self.action_count % self.k == 0:
             #  Create a new phi
             #  Reset reward to 0
-            self.dataset.add(self.phi, self.action.intArray, self.reward)
+            self.dataset.add(self.phi, self.cmd, self.reward)
 
             self.reward = 0
             self.phi = np.array(self.frame_memory)
+
+            self.agent_train(False)
 
         self._select_action(self.frame_memory)
 
         self.action_count += 1
 
+        print "self.cmd: " + str(self.cmd)
+        print "self.action: " + str(self.action.intArray)
         return self.action
 
     def agent_train(self, terminal):
+        # Wait until we have enough data to train
         if self.action_count >= (self.train.algorithm.batch_size*self.k+1):
             self.train.main_loop()
 
@@ -230,8 +297,7 @@ class BasicAgent():
     def next(self):
         phi, action, reward, phi_prime = self.replay.next()
         y = self.y_func(reward, self.discount_factor, phi_prime)[:, None]
-        a_one_hot = np.zeros(action.shape)
-        return (phi, a_one_hot, y)
+        return (phi, action, y)
 
     def agent_end(self, reward):
         # TODO What do we do with the reward?
@@ -248,9 +314,11 @@ class BasicAgent():
 
 
 def test_agent_step():
+    print "Testing."
     color_range = 128
     size_of_observation = 128+210*160
 
+    print "Setting up agent."
     agent = setup()
 
     color = 1
@@ -261,6 +329,7 @@ def test_agent_step():
     agent.agent_train(False)
 
     for i in range(2, 256):
+        print "Round %d" % i
         reward = float(i)
         color = i
         observation = Observation()
@@ -268,6 +337,7 @@ def test_agent_step():
         observation.intArray *= color
 
         agent.agent_step(reward, observation)
+        agent.agent_train(False)
 
     reward = float(i)
     color = i
@@ -277,10 +347,11 @@ def test_agent_step():
 
     agent.agent_step(reward, observation)
 
-    agent.agent_train(False)
+    agent.agent_train(True)
 
     ipdb.set_trace()
 
 if __name__ == '__main__':
+    #test_agent_step()
     agent = setup()
     AgentLoader.loadAgent(agent)
