@@ -251,10 +251,12 @@ class BasicAgent():
             self.phi = np.array(self.frame_memory)
 
         elif self.action_count % self.k == 0:
+            #  Normalize reward
+            self.reward = np.sign(self.reward)
+            #  Add to dataset
+            self.dataset.add(self.phi, self.cmd, self.reward)
             #  Create a new phi
             #  Reset reward to 0
-            self.dataset.add(self.phi, self.cmd, self.reward)
-
             self.reward = 0
             self.phi = np.array(self.frame_memory)
 
