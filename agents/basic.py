@@ -9,32 +9,32 @@ __license__ = "3-clause BSD"
 __maintainer__ = "Dustin Webb"
 __email__ = "webbd@iro"
 
+# Standard
 import collections as col
-import copy
-
-import numpy as np
-
-import theano
-from rlglue.agent.Agent import Agent
-from rlglue.agent import AgentLoader
-from rlglue.types import Action
-from rlglue.types import Observation
-from random import Random
-from hedgehog.pylearn2.datasets.replay import Replay
-import hedgehog.pylearn2.utils as utils
-from pylearn2.train import Train
-from pylearn2.training_algorithms.sgd import SGD
-from theano import function
-import theano.tensor as T
-from pylearn2.datasets import Dataset
-from pylearn2.utils import wraps
-import hedgehog.pylearn2.costs.action as ActionCost
-from pylearn2.termination_criteria import EpochCounter
 import Image
+from time import time
 import cPickle
 from subprocess import call
 import glob
 import ipdb
+# Third-party
+import numpy as np
+from theano import function
+import theano.tensor as T
+from rlglue.agent.Agent import Agent # This isn't used?
+from rlglue.agent import AgentLoader
+from rlglue.types import Action
+from rlglue.types import Observation
+from pylearn2.train import Train
+from pylearn2.training_algorithms.sgd import SGD
+from pylearn2.datasets import Dataset
+from pylearn2.utils import wraps
+from pylearn2.termination_criteria import EpochCounter
+# Internal
+from hedgehog.pylearn2.datasets.replay import Replay
+import hedgehog.pylearn2.utils as utils
+import hedgehog.pylearn2.costs.action as ActionCost
+
 
 
 def setup():
@@ -126,11 +126,15 @@ class DeepMindPreprocessor():
         image /= 2  # Calculate idxs into Atari 2600 pallete
 
         # Write out frame
+        print('Saving frame...'),
+        tic = time()
         image = self.palette[image]
         img_obj = Image.fromarray(image)
         frame = "/Tmp/webbd/drl/frame_%07d.png" % self.frame_count
         self.frame_count += 1
         img_obj.save(open(frame, 'w'))
+        toc = time()
+        print 'Done. Took %0.2f sec.' % (toc-tic)
 
         # Resize and crop
         image = np.sqrt(np.sum((image**2), axis=2))
@@ -153,6 +157,8 @@ class BasicAgent():
     episode_rewards = []
     episode = 0
     epoch_size = 50000
+    top_score = 0
+    model_pickle_path = '/Tmp/webbd/best_model.pkl'
 
     def __init__(self, model, dataset, train, view, action_map,
                  discount_factor=0.8, epsilon=0.6, k=4):
@@ -340,9 +346,26 @@ class BasicAgent():
 
         elif msg == 'episode_end':
             self.episode_rewards = self.total_reward
+
+            print 'Episode %d reward: %d' % (self.episode,
+                self.episode_rewards)
+
+            # If you get a top score
+            if self.episode_rewards > self.top_score:
+                self.top_score == self.episode_rewards
+                # Log it
+                print('Top score achieved! Saving model...'),
+                # Save model
+                tic = time()
+                cPickle.dump(self.model, self.model_pickle_path)
+                toc = time()
+                print 'Done. Took %0.2f sec.' % (toc-tic)
+
             self.total_reward = 0
             self.terminal = False
 
+            # Save video
+            tic = time()
             video_file = '/Tmp/webbd/episode_%06d.avi' % self.episode
             print("Creating video (%s)..." % video_file),
             ret = call([
@@ -351,11 +374,15 @@ class BasicAgent():
                 '/Tmp/webbd/drl/frame_%07d.png',
                 video_file
             ])
-            print "%d" % ret
+            toc = time()
+            print "Done with status: %d. Took %0.2f sec." % (ret, toc-tic)
 
+            # Remove frames
+            tic = time()
             print("Removing frames..."),
             ret = call(['rm'] + glob.glob('/Tmp/webbd/drl/*.png'))
-            print "%d" % ret
+            toc = time()
+            print 'Done with status: %d. Took %0.2f sec.' % (ret, toc-tic)
 
             self.episode += 1
             self.view.frame_count = 0
