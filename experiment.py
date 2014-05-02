@@ -21,14 +21,16 @@ import rlglue.RLGlue as RLGlue
 
 whichEpisode = 0
 
-
 def runEpisode(stepLimit):
     global whichEpisode
+    RLGlue.RL_agent_message('reset')
     terminal = RLGlue.RL_episode(stepLimit)
     totalSteps = RLGlue.RL_num_steps()
     totalReward = RLGlue.RL_return()
 
     print "Episode " + str(whichEpisode) + "\t " + str(totalSteps) + " steps \t" + str(totalReward) + " total reward\t " + str(terminal) + " natural end"
+
+    RLGlue.RL_agent_message('episode_end')
 
     whichEpisode = whichEpisode+1
 
@@ -37,5 +39,5 @@ print "\n\n----------Stepping through an episode----------"
 #We could also start over and do another experiment */
 taskSpec = RLGlue.RL_init()
 
-for i in range(50):
+for i in range(1000):
     runEpisode(100000)

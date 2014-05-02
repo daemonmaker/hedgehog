@@ -32,18 +32,20 @@ import hedgehog.pylearn2.costs.action as ActionCost
 from pylearn2.termination_criteria import EpochCounter
 import Image
 import cPickle
+from subprocess import call
+import glob
 import ipdb
 
 
 def setup():
     N = 1024  # The paper keeps 1000000 memories
-    num_frames = 3  # Prescribed by paper
+    num_frames = 4  # Prescribed by paper
     img_dims = (84, 84)  # Prescribed by paper
     action_dims = 4  # Prescribed by ALE
     batch_size = 32
-    learning_rate = 1e-2
+    learning_rate = 0.5
     batches_per_iter = 1  # How many batches to pull from memory
-    discount_factor = 0.01
+    discount_factor = 0.001
 
     print "Creating action cost."
     action_cost = ActionCost.Action()
@@ -126,7 +128,7 @@ class DeepMindPreprocessor():
         # Write out frame
         image = self.palette[image]
         img_obj = Image.fromarray(image)
-        frame = "/Tmp/webbd/drl/frame_%05d.png" % self.frame_count
+        frame = "/Tmp/webbd/drl/frame_%07d.png" % self.frame_count
         self.frame_count += 1
         img_obj.save(open(frame, 'w'))
 
@@ -143,6 +145,14 @@ class BasicAgent():
     lastAction = Action()
     lastObservation = Observation()
     total_reward = 0
+    terminal = False
+    minibatches_trained = 0
+    minibatch_q_values = []
+    epoch_q_values = []
+    epoch_rewards = []
+    episode_rewards = []
+    episode = 0
+    epoch_size = 50000
 
     def __init__(self, model, dataset, train, view, action_map,
                  discount_factor=0.8, epsilon=0.6, k=4):
@@ -183,21 +193,26 @@ class BasicAgent():
         self.frame_memory = col.deque(maxlen=self.k)
 
         # Compile action function
-        print 'BASIC AGENT: Compiling action function...'
+        print('BASIC AGENT: Compiling action function...'),
         phi_eq = T.tensor4()
         q_eq = self.model.fprop(phi_eq)
         action_eq = T.argmax(q_eq, axis=1)
         self.action_func = function([phi_eq], action_eq)
-        print 'BASIC AGENT: Done.'
+        print 'Done.'
+
+        # Compile max q
+        print('BASIC AGENT: Compiling y function...'),
+        max_action_eq = T.max(q_eq, axis=1)
+        self.max_q_func = function([phi_eq], max_action_eq)
+        print 'Done.'
 
         # Compile maximum action function
-        print 'BASIC AGENT: Compiling y function...'
-        max_action_eq = T.max(q_eq, axis=1)
+        print('BASIC AGENT: Compiling y function...'),
         r = T.fvector('r')
         gamma = T.fscalar('gamma')
         y = r + gamma*max_action_eq
         self.y_func = function([r, gamma, phi_eq], y)
-        print 'BASIC AGENT: Done.'
+        print 'Done.'
 
     def agent_init(self, taskSpec):
         self.lastAction = Action()
@@ -260,14 +275,24 @@ class BasicAgent():
             self.reward = 0
             self.phi = np.array(self.frame_memory)
 
-            self.agent_train(False)
+            self.agent_train(self.terminal)
+            self.terminal = False
+
+            self.minibatches_trained += 1
+            phi = self.phi[:, :, :, None]
+            self.minibatch_q_values.append(self.max_q_func(phi)[0])
+            if self.minibatches_trained % self.epoch_size == 0:
+                self.epoch_q_values.append(np.mean(self.minibatch_q_values))
+                self.epoch_rewards.append(np.mean(self.episode_rewards))
+                print "self.epoch_q_values:", str(self.epoch_q_values)
+                print "self.epoch_rewards:", str(self.epoch_rewards)
+                self.episode_rewards = []
+                self.minibatch_q_values = []
 
         self._select_action(self.frame_memory)
 
         self.action_count += 1
 
-        print "self.cmd: " + str(self.cmd)
-        print "self.action: " + str(self.action.intArray)
         return self.action
 
     def agent_train(self, terminal):
@@ -309,10 +334,37 @@ class BasicAgent():
         pass
 
     def agent_message(self, msg):
-        if msg == 'what is your name?':
-            return "Basic Atari agent."
-        else:
-            return 'I don\'t understand'
+        if msg == 'terminal':
+            self.terminal = True
+            return 'Set terminal.'
+
+        elif msg == 'episode_end':
+            self.episode_rewards = self.total_reward
+            self.total_reward = 0
+            self.terminal = False
+
+            video_file = '/Tmp/webbd/episode_%06d.avi' % self.episode
+            print("Creating video (%s)..." % video_file),
+            ret = call([
+                'ffmpeg',
+                '-i',
+                '/Tmp/webbd/drl/frame_%07d.png',
+                video_file
+            ])
+            print "%d" % ret
+
+            print("Removing frames..."),
+            ret = call(['rm'] + glob.glob('/Tmp/webbd/drl/*.png'))
+            print "%d" % ret
+
+            self.episode += 1
+            self.view.frame_count = 0
+
+        elif msg == 'reset':
+            self.terminal = False
+            self.total_reward = 0
+            self.action_count = 0
+            return 'Reset.'
 
 
 def test_agent_step():
