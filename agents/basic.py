@@ -11,17 +11,15 @@ __email__ = "webbd@iro"
 
 # Standard
 import collections as col
-import Image
 from time import time
 import cPickle
-from subprocess import call
-import glob
-import ipdb
+import os
+
 # Third-party
 import numpy as np
 from theano import function
 import theano.tensor as T
-from rlglue.agent.Agent import Agent # This isn't used?
+from rlglue.agent.Agent import Agent  # This isn't used?
 from rlglue.agent import AgentLoader
 from rlglue.types import Action
 from rlglue.types import Observation
@@ -30,15 +28,16 @@ from pylearn2.training_algorithms.sgd import SGD
 from pylearn2.datasets import Dataset
 from pylearn2.utils import wraps
 from pylearn2.termination_criteria import EpochCounter
+
 # Internal
 from hedgehog.pylearn2.datasets.replay import Replay
 import hedgehog.pylearn2.utils as utils
 import hedgehog.pylearn2.costs.action as ActionCost
-
+import hedgehog.percept_processors.percept_preprocessors as ppp
 
 
 def setup():
-    N = 1024  # The paper keeps 1000000 memories
+    N = 10000  # The paper keeps 1000000 memories
     num_frames = 4  # Prescribed by paper
     img_dims = (84, 84)  # Prescribed by paper
     action_dims = 4  # Prescribed by ALE
@@ -46,12 +45,15 @@ def setup():
     learning_rate = 0.5
     batches_per_iter = 1  # How many batches to pull from memory
     discount_factor = 0.001
+    base_dir = '/Tmp/webbd/drl/experiments/2'
 
     print "Creating action cost."
     action_cost = ActionCost.Action()
 
-    print "Loading model yaml."
-    model_yaml = '../models/model_conv.yaml'
+    # TODO This is a hacky way to find the model yaml
+    model_yaml = os.path.dirname(os.path.realpath(__file__))
+    model_yaml = os.path.join(model_yaml, '../models/model_conv.yaml')
+    print "Loading model yaml (%s)" % model_yaml
     yaml_params = {
         'num_channels': num_frames,
         'action_dims': action_dims,
@@ -81,8 +83,8 @@ def setup():
     print "Creating training object."
     train = Train(dataset=None, model=model, algorithm=algo)
 
-    print "Creating view."
-    view = DeepMindPreprocessor(img_dims)
+    print "Creating percept_preprocessor."
+    percept_preprocessor = ppp.DeepMindPreprocessor(img_dims, base_dir)
 
     print "Creating agent."
     action_map = {
@@ -91,61 +93,48 @@ def setup():
         2: 3,
         3: 4,
     }
-    return BasicAgent(
+    return BasicQAgent(
         model,
         dataset,
         train,
-        view,
+        percept_preprocessor,
         action_map,
+        base_dir,
         discount_factor=discount_factor,
         k=num_frames
     )
 
 
-class DeepMindPreprocessor():
-    def __init__(self, img_dims):
-        assert(type(img_dims) == tuple and len(img_dims) == 2)
-        self.img_dims = img_dims
-        self.offset = 128  # Start of image in observation
-        self.atari_frame_size = (210, 160)
-        self.reduced_frame_size = (110, 84)  # Prescribed by paper
-        self.crop_start = (20, 0)  # Crop start prescribed by authors
+class BasicQAgent(object):
+    """
+    Basic RL Q-learning agent.
 
-        print "Loading palette."
-        self.palette = cPickle.load(open('../stella_palette.pkl', 'rb'))
-
-        self.frame_count = 0
-
-    def get_frame(self, observation):
-        #  TODO confirm this does a deep copy
-        image = utils.observation_to_image(
-            observation,
-            self.offset,
-            self.atari_frame_size
-        )
-        image /= 2  # Calculate idxs into Atari 2600 pallete
-
-        # Write out frame
-        print('Saving frame...'),
-        tic = time()
-        image = self.palette[image]
-        img_obj = Image.fromarray(image)
-        frame = "/Tmp/webbd/drl/frame_%07d.png" % self.frame_count
-        self.frame_count += 1
-        img_obj.save(open(frame, 'w'))
-        toc = time()
-        print 'Done. Took %0.2f sec.' % (toc-tic)
-
-        # Resize and crop
-        image = np.sqrt(np.sum((image**2), axis=2))
-        image = image.astype(np.uint8)
-        image = utils.resize_image(image, self.reduced_frame_size)
-        image = utils.crop_image(image, self.crop_start, self.img_dims)
-
-        return image
-
-
-class BasicAgent():
+    model: Model
+        Pylearn2 model object.
+        Pylearn2 dataset for storing memories.
+    dataset: Dataset
+    train: Train
+        Pylearn2 train object for training agent.
+    percept_preprocessor: PerceptPreprocessor
+        Object for preprocessing percepts.
+    action_map: dictionary
+        Dictionary for mapping actions to ALE actions.
+    base_dir: string
+        Base directory for storing models, videos, and the like.
+    discount_factor: float
+        Discount factor for Bellman equation.
+    epsilon_start: float
+        Rate at which to select random actions.
+        0 => Always us policy.
+        1 => Always select randomly.
+    epsilon_anneal_frames: int
+        Number of frames over which epsilon should be annealed. Set to 0 to
+        prevent annealing.
+    epsilon_end: float
+        Final epsilon value. Only valid when epsilon_anneal_frames > 0.
+    k: int
+        Number of percepts to group into one memory.
+    """
     lastAction = Action()
     lastObservation = Observation()
     total_reward = 0
@@ -158,10 +147,15 @@ class BasicAgent():
     episode = 0
     epoch_size = 50000
     top_score = 0
-    model_pickle_path = '/Tmp/webbd/best_model.pkl'
+    model_pickle_name = 'best_model.pkl'
+    all_time_total_frames = 0
 
-    def __init__(self, model, dataset, train, view, action_map,
-                 discount_factor=0.8, epsilon=0.6, k=4):
+    def __init__(
+        self, model, dataset, train, percept_preprocessor, action_map,
+        base_dir,
+        epsilon=1, epsilon_anneal_frames=1000000, epsilon_end=0.1,
+        discount_factor=0.8, k=4,
+    ):
         # Validate and store parameters
         assert(model)
         self.model = model
@@ -172,19 +166,32 @@ class BasicAgent():
         assert(train)
         self.train = train
 
-        assert(view)
-        self.view = view
+        assert(percept_preprocessor)
+        self.percept_preprocessor = percept_preprocessor
 
         assert(action_map and type(action_map) == dict)
         self.action_map = action_map
+
+        assert(base_dir)
+        self.base_dir = base_dir
 
         assert(discount_factor > 0)
         if (discount_factor >= 1):
             print "WARNING: Discount factor >= 1, learning may diverge."
         self.discount_factor = discount_factor
 
-        assert(epsilon > 0 and epsilon <= 1)
+        assert(epsilon >= 0 and epsilon <= 1)
         self.epsilon = epsilon
+
+        assert(epsilon_anneal_frames >= 0)
+        self.epsilon_anneal_frames = epsilon_anneal_frames
+
+        assert(epsilon_end >= 0)
+        self.epsilon_end = epsilon_end
+
+        if self.epsilon_anneal_frames > 0:
+            self.epsilon_annealing_rate = (self.epsilon - self.epsilon_end)
+            self.epsilon_annealing_rate /= self.epsilon_anneal_frames
 
         assert(k > 0)
         self.k = k
@@ -221,42 +228,45 @@ class BasicAgent():
         print 'Done.'
 
     def agent_init(self, taskSpec):
+        """
+        Initializes agent.
+
+        taskSpec: string
+            Currently unused. Required by RL-Glue agent interface.
+        """
         self.lastAction = Action()
         self.lastObservation = Observation()
 
     def agent_start(self, observation):
+        """
+        Starts agent.
+
+        observation: Observation
+            Initial RL-Glue observation.
+        """
         print 'BASIC AGENT: start'
+        self.all_time_total_frames += 1
+
         # Generate random action, one-hot binary vector
         self._select_action()
 
         self.action_count += 1
-        frame = self.view.get_frame(observation)
+        frame = self.percept_preprocessor.get_frame(observation)
         self.frame_memory.append(frame)
         return self.action
 
-    def _select_action(self, phi=None):
-        if self.action_count % self.k == 0:
-            if (np.random.rand() > self.epsilon) and phi:
-                # Get action from Q-function
-                #print 'q action...'
-                phi = np.array(phi)[:, :, :, None]
-                action_int = self.action_func(phi)[0]
-            else:
-                # Get random action
-                action_int = np.random.randint(0, len(self.action_map))
-
-            self.cmd = [0]*len(self.action_map)
-            self.cmd[action_int] = 1
-
-            # Map cmd to ALE action
-            # 18 is the number of commands ALE accepts
-            action = Action()
-            #action.intArray = [0]*18
-            #action.intArray[self.action_map[action_int]] = 1
-            action.intArray = [self.action_map[action_int]]
-            self.action = action
+        self._anneal_parameters()
 
     def agent_step(self, reward, observation):
+        """
+        Calculates agent's next action.
+
+        reward: float
+            Reward received for previous action.
+        observation: Observation
+            Observation of current state.
+        """
+        self.all_time_total_frames += 1
         self.reward += reward
         self.total_reward += reward
 
@@ -264,7 +274,7 @@ class BasicAgent():
             print "self.total_reward: %d" % self.total_reward
 
         #print 'BASIC AGENT: step'
-        frame = self.view.get_frame(observation)
+        frame = self.percept_preprocessor.get_frame(observation)
         self.frame_memory.append(frame)
 
         if self.action_count == self.k:
@@ -299,9 +309,46 @@ class BasicAgent():
 
         self.action_count += 1
 
+        self._anneal_parameters()
+
         return self.action
 
+    def _select_action(self, phi=None):
+        """
+        Utility function for selecting an action.
+
+        phi: ndarray
+            Memory from which action should be selected.
+        """
+        if self.action_count % self.k == 0:
+            if (np.random.rand() > self.epsilon) and phi:
+                # Get action from Q-function
+                phi = np.array(phi)[:, :, :, None]
+                action_int = self.action_func(phi)[0]
+            else:
+                # Get random action
+                action_int = np.random.randint(0, len(self.action_map))
+
+            self.cmd = [0]*len(self.action_map)
+            self.cmd[action_int] = 1
+
+            # Map cmd to ALE action
+            # 18 is the number of commands ALE accepts
+            action = Action()
+            action.intArray = [self.action_map[action_int]]
+            self.action = action
+
+    def _anneal_parameters(self):
+        if self.all_time_total_frames < self.epsilon_anneal_frames:
+            self.epsilon -= self.epsilon_annealing_rate
+
     def agent_train(self, terminal):
+        """
+        Training function.
+
+        terminal: boolean
+            Whether current state is a terminal state.
+        """
         # Wait until we have enough data to train
         if self.action_count >= (self.train.algorithm.batch_size*self.k+1):
             self.train.main_loop()
@@ -328,64 +375,79 @@ class BasicAgent():
         return self
 
     def next(self):
+        """
+        Returns next object from iterator.
+        """
         phi, action, reward, phi_prime = self.replay.next()
         y = self.y_func(reward, self.discount_factor, phi_prime)[:, None]
         return (phi, action, y)
 
     def agent_end(self, reward):
+        """
+        Call to notify agent that episode is ending.
+
+        reward: float
+            Final reward.
+        """
         # TODO What do we do with the reward?
         pass
 
     def agent_cleanup(self):
+        """
+        Permits agent to cleanup after an episode.
+        """
         pass
 
     def agent_message(self, msg):
+        """
+        RL-Glue generic message interface.
+
+        msg: string
+            Arbitrary message from another process. Current supported values:
+            -terminal: Notifies the agent that the next state is a terminal
+             state.
+            -episode_end: Notifies the agent that the episode has completed.
+            -reset: Resets the agent
+        """
         if msg == 'terminal':
             self.terminal = True
             return 'Set terminal.'
 
         elif msg == 'episode_end':
-            self.episode_rewards = self.total_reward
+            self.episode_rewards.append(self.total_reward)
 
-            print 'Episode %d reward: %d' % (self.episode,
-                self.episode_rewards)
+            print('Episode %d reward: %d' % (self.episode,
+                                             self.total_reward)),
 
             # If you get a top score
-            if self.episode_rewards > self.top_score:
+            if self.total_reward > self.top_score:
                 self.top_score == self.episode_rewards
+
                 # Log it
-                print('Top score achieved! Saving model...'),
+                print(" Top score achieved!")
+                print("Saving model..."),
+
                 # Save model
                 tic = time()
-                cPickle.dump(self.model, self.model_pickle_path)
+                file_name = os.path.join(
+                    self.base_dir,
+                    self.model_pickle_name
+                )
+                cPickle.dump(self.model, file_name)
                 toc = time()
                 print 'Done. Took %0.2f sec.' % (toc-tic)
 
+                video_name = 'episode_%06d.avi' % idx
+                self.percept_preprocessor.save_video(video_name)
+
+            print ""  # Print newline and carriage return
+
+            # Reset relevant variables
             self.total_reward = 0
             self.terminal = False
 
-            # Save video
-            tic = time()
-            video_file = '/Tmp/webbd/episode_%06d.avi' % self.episode
-            print("Creating video (%s)..." % video_file),
-            ret = call([
-                'ffmpeg',
-                '-i',
-                '/Tmp/webbd/drl/frame_%07d.png',
-                video_file
-            ])
-            toc = time()
-            print "Done with status: %d. Took %0.2f sec." % (ret, toc-tic)
-
-            # Remove frames
-            tic = time()
-            print("Removing frames..."),
-            ret = call(['rm'] + glob.glob('/Tmp/webbd/drl/*.png'))
-            toc = time()
-            print 'Done with status: %d. Took %0.2f sec.' % (ret, toc-tic)
-
+            # Count episode
             self.episode += 1
-            self.view.frame_count = 0
 
         elif msg == 'reset':
             self.terminal = False
@@ -430,7 +492,7 @@ def test_agent_step():
 
     agent.agent_train(True)
 
-    ipdb.set_trace()
+    #ipdb.set_trace()
 
 if __name__ == '__main__':
     #test_agent_step()
