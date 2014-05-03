@@ -421,7 +421,7 @@ class BasicQAgent(object):
 
             # If you get a top score
             if self.total_reward > self.top_score:
-                self.top_score == self.total_reward
+                self.top_score = self.total_reward
 
                 # Log it
                 print(" Top score achieved!")
