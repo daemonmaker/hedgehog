@@ -440,9 +440,11 @@ class BasicQAgent(object):
             # If you get a top score
             time_to_save = self.episode % self.save_rate == 0
             high_score_reached = self.total_reward >= self.top_score
-            if time_to_save or high_score_reached:
+
+            if high_score_reached:
                 self.top_score = self.total_reward
 
+            if time_to_save or high_score_reached:
                 # Log it
                 print(" Top score achieved!")
 
