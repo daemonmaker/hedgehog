@@ -45,20 +45,27 @@ def setup():
     learning_rate = 0.5
     batches_per_iter = 1  # How many batches to pull from memory
     discount_factor = 0.001
-    base_dir = '/Tmp/webbd/drl/experiments/2'
+    base_dir = '/Tmp/webbd/drl/experiments/3'
+    model_pickle_path = os.path.join(base_dir, 'best_model.pkl')
 
     print "Creating action cost."
     action_cost = ActionCost.Action()
 
-    # TODO This is a hacky way to find the model yaml
-    model_yaml = os.path.dirname(os.path.realpath(__file__))
-    model_yaml = os.path.join(model_yaml, '../models/model_conv.yaml')
-    print "Loading model yaml (%s)" % model_yaml
-    yaml_params = {
-        'num_channels': num_frames,
-        'action_dims': action_dims,
-    }
-    model = utils.load_yaml_template(model_yaml, yaml_params)
+    # Load the model if it exists
+    if os.path.exists(model_pickle_path):
+        model = cPickle.load(open(model_pickle_path, 'rb'))
+
+    # Otherwise create a new model
+    else:
+        # TODO This is a hacky way to find the model yaml
+        model_yaml = os.path.dirname(os.path.realpath(__file__))
+        model_yaml = os.path.join(model_yaml, '../models/model_conv.yaml')
+        print "Loading model yaml (%s)" % model_yaml
+        yaml_params = {
+            'num_channels': num_frames,
+            'action_dims': action_dims,
+        }
+        model = utils.load_yaml_template(model_yaml, yaml_params)
 
     print "Creating dataset."
     dataset = Replay(N, img_dims, num_frames, action_dims)
@@ -100,6 +107,7 @@ def setup():
         percept_preprocessor,
         action_map,
         base_dir,
+        model_pickle_path,
         discount_factor=discount_factor,
         k=num_frames
     )
@@ -121,6 +129,11 @@ class BasicQAgent(object):
         Dictionary for mapping actions to ALE actions.
     base_dir: string
         Base directory for storing models, videos, and the like.
+    model_pickle_path: string
+        Path to model pickle file.
+    save_rate: int
+        Number of episodes after which model should be pickled and video
+        created.
     discount_factor: float
         Discount factor for Bellman equation.
     epsilon_start: float
@@ -147,12 +160,11 @@ class BasicQAgent(object):
     episode = 0
     epoch_size = 50000
     top_score = -1
-    model_pickle_name = 'best_model.pkl'
     all_time_total_frames = 0
 
     def __init__(
         self, model, dataset, train, percept_preprocessor, action_map,
-        base_dir,
+        base_dir, model_pickle_path, save_rate=25,
         epsilon=1, epsilon_anneal_frames=1000000, epsilon_end=0.1,
         discount_factor=0.8, k=4,
     ):
@@ -172,8 +184,14 @@ class BasicQAgent(object):
         assert(action_map and type(action_map) == dict)
         self.action_map = action_map
 
-        assert(base_dir)
+        assert(os.path.exists(base_dir))
         self.base_dir = base_dir
+
+        assert(os.path.exists(os.path.dirname(model_pickle_path)))
+        self.model_pickle_path = model_pickle_path
+
+        assert(save_rate > 0)
+        self.save_rate = save_rate
 
         assert(discount_factor > 0)
         if (discount_factor >= 1):
@@ -420,20 +438,18 @@ class BasicQAgent(object):
                                              self.total_reward)),
 
             # If you get a top score
-            if self.total_reward > self.top_score:
+            time_to_save = self.episode % self.save_rate == 0
+            high_score_reached = self.total_reward >= self.top_score
+            if time_to_save or high_score_reached:
                 self.top_score = self.total_reward
 
                 # Log it
                 print(" Top score achieved!")
 
                 # Save model
-                print("Saving model..."),
+                print("Saving model (%s))..." % self.model_pickle_path),
                 tic = time()
-                file_name = os.path.join(
-                    self.base_dir,
-                    self.model_pickle_name
-                )
-                cPickle.dump(self.model, open(file_name, 'w'))
+                cPickle.dump(self.model, open(self.model_pickle_path, 'wb'))
                 toc = time()
                 print 'Done. Took %0.2f sec.' % (toc-tic)
 
