@@ -24,6 +24,7 @@ from rlglue.agent import AgentLoader
 from rlglue.types import Action
 from rlglue.types import Observation
 from pylearn2.train import Train
+import pylearn2.monitor as monitor
 from pylearn2.training_algorithms.sgd import SGD
 from pylearn2.datasets import Dataset
 from pylearn2.utils import wraps
@@ -45,7 +46,7 @@ def setup():
     learning_rate = 0.5
     batches_per_iter = 1  # How many batches to pull from memory
     discount_factor = 0.001
-    base_dir = '/Tmp/webbd/drl/experiments/3'
+    base_dir = '/media/hd1/drl/experiments/1'
     model_pickle_path = os.path.join(base_dir, 'best_model.pkl')
 
     print "Creating action cost."
@@ -54,6 +55,7 @@ def setup():
     # Load the model if it exists
     if os.path.exists(model_pickle_path):
         model = cPickle.load(open(model_pickle_path, 'rb'))
+        model = monitor.push_monitor(model, "atari_temp",  transfer_experience=True)
 
     # Otherwise create a new model
     else:
@@ -100,6 +102,7 @@ def setup():
         2: 3,
         3: 4,
     }
+
     return BasicQAgent(
         model,
         dataset,
