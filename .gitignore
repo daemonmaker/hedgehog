@@ -1,6 +1,5 @@
 # Python
 *.pyc
-*.pkl
 
 # Latex
 *.aux
