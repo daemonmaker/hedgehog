@@ -459,6 +459,7 @@ class BasicQAgent(object):
             print ""  # Print newline and carriage return
 
             # Reset relevant variables
+            self.percept_preprocessor.reset_frames()
             self.total_reward = 0
             self.terminal = False
 
