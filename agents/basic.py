@@ -146,7 +146,7 @@ class BasicQAgent(object):
     episode_rewards = []
     episode = 0
     epoch_size = 50000
-    top_score = 0
+    top_score = -1
     model_pickle_name = 'best_model.pkl'
     all_time_total_frames = 0
 
@@ -421,23 +421,23 @@ class BasicQAgent(object):
 
             # If you get a top score
             if self.total_reward > self.top_score:
-                self.top_score == self.episode_rewards
+                self.top_score == self.total_reward
 
                 # Log it
                 print(" Top score achieved!")
-                print("Saving model..."),
 
                 # Save model
+                print("Saving model..."),
                 tic = time()
                 file_name = os.path.join(
                     self.base_dir,
                     self.model_pickle_name
                 )
-                cPickle.dump(self.model, file_name)
+                cPickle.dump(self.model, open(file_name, 'w'))
                 toc = time()
                 print 'Done. Took %0.2f sec.' % (toc-tic)
 
-                video_name = 'episode_%06d.avi' % idx
+                video_name = 'episode_%06d.avi' % self.episode
                 self.percept_preprocessor.save_video(video_name)
 
             print ""  # Print newline and carriage return

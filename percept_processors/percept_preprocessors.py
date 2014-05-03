@@ -62,9 +62,9 @@ class PerceptPreprocessor(object):
         tic = time()
 
         for idx, frame in enumerate(self.frames):
-            img_obj = Image.fromarray(image)
-            frame = os.path.join(loc, self.frame_name_template % idx)
-            img_obj.save(open(frame, 'w'))
+            img_obj = Image.fromarray(frame)
+            frame_file = os.path.join(loc, self.frame_name_template % idx)
+            img_obj.save(open(frame_file, 'w'))
 
         toc = time()
 
