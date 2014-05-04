@@ -14,12 +14,13 @@ import collections as col
 from time import time
 import cPickle
 import os
+import logging
+#import ipdb
 
 # Third-party
 import numpy as np
 from theano import function
 import theano.tensor as T
-from rlglue.agent.Agent import Agent  # This isn't used?
 from rlglue.agent import AgentLoader
 from rlglue.types import Action
 from rlglue.types import Observation
@@ -29,13 +30,17 @@ from pylearn2.training_algorithms.sgd import SGD
 from pylearn2.datasets import Dataset
 from pylearn2.utils import wraps
 from pylearn2.termination_criteria import EpochCounter
+from pylearn2.space import CompositeSpace
+from pylearn2.utils.data_specs import DataSpecsMapping
 
 # Internal
-from hedgehog.pylearn2.datasets.replay import Replay
+from hedgehog.pylearn2.datasets.replay_list import Replay
 import hedgehog.pylearn2.utils as utils
 import hedgehog.pylearn2.costs.action as ActionCost
 import hedgehog.percept_processors.percept_preprocessors as ppp
 
+log = logging.getLogger(__name__)
+logging.basicConfig(filename='basic.log',level=logging.DEBUG)
 
 def setup():
     N = 10000  # The paper keeps 1000000 memories
@@ -46,39 +51,39 @@ def setup():
     learning_rate = 0.5
     batches_per_iter = 1  # How many batches to pull from memory
     discount_factor = 0.001
-    base_dir = '/media/hd1/drl/experiments/1'
+    base_dir = '/media/hd1/drl/experiments/2'
     model_pickle_path = os.path.join(base_dir, 'best_model.pkl')
 
-    print "Creating action cost."
+    log.info("Creating action cost.")
     action_cost = ActionCost.Action()
 
     # Load the model if it exists
     if os.path.exists(model_pickle_path):
         model = cPickle.load(open(model_pickle_path, 'rb'))
-        model = monitor.push_monitor(model, "atari_temp",  transfer_experience=True)
+        model = monitor.push_monitor(model, "at",  transfer_experience=True)
 
     # Otherwise create a new model
     else:
         # TODO This is a hacky way to find the model yaml
         model_yaml = os.path.dirname(os.path.realpath(__file__))
         model_yaml = os.path.join(model_yaml, '../models/model_conv.yaml')
-        print "Loading model yaml (%s)" % model_yaml
+        log.info("Loading model yaml (%s)" % model_yaml)
         yaml_params = {
             'num_channels': num_frames,
             'action_dims': action_dims,
         }
         model = utils.load_yaml_template(model_yaml, yaml_params)
 
-    print "Creating dataset."
+    log.info("Creating dataset.")
     dataset = Replay(N, img_dims, num_frames, action_dims)
 
     #monitoring_dataset = {}
     #monitoring_dataset['train'] = dataset
 
-    print "Creating terminiation criterion."
+    log.info("Creating terminiation criterion.")
     termination_criterion = EpochCounter(1)
 
-    print "Creating training algorithm."
+    log.info("Creating training algorithm.")
     algo = SGD(
         batch_size=batch_size,
         learning_rate=learning_rate,
@@ -89,13 +94,13 @@ def setup():
         termination_criterion=termination_criterion
     )
 
-    print "Creating training object."
+    log.info("Creating training object.")
     train = Train(dataset=None, model=model, algorithm=algo)
 
-    print "Creating percept_preprocessor."
+    log.info("Creating percept_preprocessor.")
     percept_preprocessor = ppp.DeepMindPreprocessor(img_dims, base_dir)
 
-    print "Creating agent."
+    log.info("Creating agent.")
     action_map = {
         0: 0,
         1: 1,
@@ -164,6 +169,10 @@ class BasicQAgent(object):
     epoch_size = 50000
     top_score = -1
     all_time_total_frames = 0
+    episode_training_time = 0
+    episode_start = time()
+    train_setup = 0
+    train_reward = 0
 
     def __init__(
         self, model, dataset, train, percept_preprocessor, action_map,
@@ -198,7 +207,7 @@ class BasicQAgent(object):
 
         assert(discount_factor > 0)
         if (discount_factor >= 1):
-            print "WARNING: Discount factor >= 1, learning may diverge."
+            log.warning("Discount factor >= 1, learning may diverge.")
         self.discount_factor = discount_factor
 
         assert(epsilon >= 0 and epsilon <= 1)
@@ -227,26 +236,26 @@ class BasicQAgent(object):
         self.frame_memory = col.deque(maxlen=self.k)
 
         # Compile action function
-        print('BASIC AGENT: Compiling action function...'),
+        log.info('BASIC AGENT: Compiling action function...'),
         phi_eq = T.tensor4()
         q_eq = self.model.fprop(phi_eq)
         action_eq = T.argmax(q_eq, axis=1)
         self.action_func = function([phi_eq], action_eq)
-        print 'Done.'
+        log.info('Done.')
 
         # Compile max q
-        print('BASIC AGENT: Compiling y function...'),
+        log.info('BASIC AGENT: Compiling y function...'),
         max_action_eq = T.max(q_eq, axis=1)
         self.max_q_func = function([phi_eq], max_action_eq)
-        print 'Done.'
+        log.info('Done.')
 
         # Compile maximum action function
-        print('BASIC AGENT: Compiling y function...'),
+        log.info('BASIC AGENT: Compiling y function...'),
         r = T.fvector('r')
         gamma = T.fscalar('gamma')
         y = r + gamma*max_action_eq
         self.y_func = function([r, gamma, phi_eq], y)
-        print 'Done.'
+        log.info('Done.')
 
     def agent_init(self, taskSpec):
         """
@@ -265,7 +274,7 @@ class BasicQAgent(object):
         observation: Observation
             Initial RL-Glue observation.
         """
-        print 'BASIC AGENT: start'
+        log.info('BASIC AGENT: start')
         self.all_time_total_frames += 1
 
         # Generate random action, one-hot binary vector
@@ -291,10 +300,6 @@ class BasicQAgent(object):
         self.reward += reward
         self.total_reward += reward
 
-        if self.action_count % 100:
-            print "self.total_reward: %d" % self.total_reward
-
-        #print 'BASIC AGENT: step'
         frame = self.percept_preprocessor.get_frame(observation)
         self.frame_memory.append(frame)
 
@@ -321,8 +326,8 @@ class BasicQAgent(object):
             if self.minibatches_trained % self.epoch_size == 0:
                 self.epoch_q_values.append(np.mean(self.minibatch_q_values))
                 self.epoch_rewards.append(np.mean(self.episode_rewards))
-                print "self.epoch_q_values:", str(self.epoch_q_values)
-                print "self.epoch_rewards:", str(self.epoch_rewards)
+                log.info("self.epoch_q_values: %s" % str(self.epoch_q_values))
+                log.info("self.epoch_rewards: %s" % str(self.epoch_rewards))
                 self.episode_rewards = []
                 self.minibatch_q_values = []
 
@@ -371,8 +376,44 @@ class BasicQAgent(object):
             Whether current state is a terminal state.
         """
         # Wait until we have enough data to train
-        if self.action_count >= (self.train.algorithm.batch_size*self.k+1):
-            self.train.main_loop()
+        if self.action_count >= ((self.train.algorithm.batch_size+1)*self.k+1):
+            tic = time()
+            if self.train_setup == 0:
+                self.train.main_loop()
+
+                data_specs = self.train.algorithm.cost.get_data_specs(self.model)
+
+                # The iterator should be built from flat data specs, so it returns
+                # flat, non-redundent tuples of data.
+                mapping = DataSpecsMapping(data_specs)
+                space_tuple = mapping.flatten(data_specs[0], return_tuple=True)
+                source_tuple = mapping.flatten(data_specs[1], return_tuple=True)
+                if len(space_tuple) == 0:
+                    # No data will be returned by the iterator, and it is impossible
+                    # to know the size of the actual batch.
+                    # It is not decided yet what the right thing to do should be.
+                    raise NotImplementedError("Unable to train with SGD, because "
+                            "the cost does not actually use data from the data set. "
+                            "data_specs: %s" % str(data_specs))
+                flat_data_specs = (CompositeSpace(space_tuple), source_tuple)
+                self.flat_data_specs = flat_data_specs
+                self.train_setup=1
+            else:
+                tic_iter = time()
+                temp_iter = self.train.dataset.iterator(mode=self.train.algorithm.train_iteration_mode, batch_size=self.train.algorithm.batch_size, data_specs=self.flat_data_specs, return_tuple=True, rng = self.train.algorithm.rng, num_batches = self.train.algorithm.batches_per_iter)
+                toc_iter = time()
+                log.debug('Iter creation time: %0.2f' % (toc_iter - tic_iter))
+                tic_next = time()
+                batch = temp_iter.next()
+                toc_next = time()
+                log.debug('Iter next time: %0.2f' % (toc_next - tic_next))
+                tic_sgd = time()
+                self.train.algorithm.sgd_update(*batch)
+                toc_sgd = time()
+                log.debug('SGD time: %0.2f' % (toc_sgd - tic_sgd))
+            toc = time()
+            self.episode_training_time += toc-tic
+            log.debug('Real train time: %0.2f' % (toc-tic))
 
     @wraps(Dataset.__iter__)
     def __iter__(self):
@@ -399,7 +440,14 @@ class BasicQAgent(object):
         """
         Returns next object from iterator.
         """
+        # tic = time()
         phi, action, reward, phi_prime = self.replay.next()
+        # toc = time()
+
+        # log.debug('Replay next time: %0.2f' % (toc-tic))
+        self.train_reward += np.sum(reward)
+
+        log.debug('Train reward: %0.2f' % self.train_reward)
         y = self.y_func(reward, self.discount_factor, phi_prime)[:, None]
         return (phi, action, y)
 
@@ -437,31 +485,45 @@ class BasicQAgent(object):
         elif msg == 'episode_end':
             self.episode_rewards.append(self.total_reward)
 
-            print('Episode %d reward: %d' % (self.episode,
-                                             self.total_reward)),
+            # Calculate values for logging
+            high_score_string = ''
+            param = np.mean(self.model.layers[0].get_params()[0].get_value())
+
+            toc = time()
+            episode_time = toc - self.episode_start
 
             # If you get a top score
             time_to_save = self.episode % self.save_rate == 0
             high_score_reached = self.total_reward >= self.top_score
 
             if high_score_reached:
+                high_score_string = 'High score!'
                 self.top_score = self.total_reward
 
-            if time_to_save or high_score_reached:
-                # Log it
-                print(" Top score achieved!")
+            log.info('--Episode %d--' % self.episode)
+            log.info('Score: %d - %s'
+                % (self.total_reward, high_score_string))
+            log.info('Time: %0.2f sec.' % episode_time)
+            log.info('Training time: %0.2f sec.'
+                % self.episode_training_time)
+            log.info('Training reward: %d' % int(self.train_reward))
+            log.info('Parameter mean: %0.5e' % param)
 
+            # Reset logging values
+            self.train_reward = 0
+            self.episode_start = time()
+            self.episode_training_time = 0
+
+            if time_to_save or high_score_reached:
                 # Save model
-                print("Saving model (%s))..." % self.model_pickle_path),
+                log.info("Saving model (%s))..." % self.model_pickle_path),
                 tic = time()
                 cPickle.dump(self.model, open(self.model_pickle_path, 'wb'))
                 toc = time()
-                print 'Done. Took %0.2f sec.' % (toc-tic)
+                log.info('Done. Took %0.2f sec.' % (toc-tic))
 
                 video_name = 'episode_%06d.avi' % self.episode
                 self.percept_preprocessor.save_video(video_name)
-
-            print ""  # Print newline and carriage return
 
             # Reset relevant variables
             self.percept_preprocessor.reset_frames()

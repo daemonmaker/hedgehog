@@ -14,7 +14,11 @@ from pylearn2.datasets import Dataset
 import pylearn2.utils.iteration as iteration
 import ipdb
 import theano
+from time import time
+import logging
 
+log = logging.getLogger(__name__)
+logging.basicConfig(filename='basic.log',level=logging.DEBUG)
 
 class Replay(Dataset):
     #self.stochastic = False
@@ -141,18 +145,20 @@ class Replay(Dataset):
     def next(self):
         slice = self.iter.next()
         ids = self.idxs[slice].copy()
+
         if self.full:
             ids += self.current_exp
             ids %= self.total_size
 
         phi_prime_ids = (ids+1) % self.total_size
 
-        return (
-            self.phis[:, :, :, ids].astype(np.float32),
-            self.actions[ids],
-            self.rewards[ids].flatten(),
-            self.phis[:, :, :, phi_prime_ids].astype(np.float32)
-        )
+        phi1 = self.phis[:, :, :, ids]
+        phi1t = phi1.astype(np.float32)
+        actions = self.actions[ids]
+        rewards = self.rewards[ids].flatten()
+        phi2 = self.phis[:, :, :, phi_prime_ids].astype(np.float32)
+        phi2t = phi2.astype(np.float32)
+        return (phi1t, actions, rewards, phi2)
 
     # TODO Remove this when dataset contract is corrected. Currently it is not
     # required but is required by FiniteDatasetIterator.
