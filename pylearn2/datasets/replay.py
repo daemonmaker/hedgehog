@@ -14,7 +14,11 @@ from pylearn2.datasets import Dataset
 import pylearn2.utils.iteration as iteration
 import ipdb
 import theano
+from time import time
+import logging
 
+log = logging.getLogger(__name__)
+logging.basicConfig(filename='basic.log',level=logging.DEBUG)
 
 class Replay(Dataset):
     #self.stochastic = False
@@ -49,14 +53,18 @@ class Replay(Dataset):
         self.action_dims = action_dims
 
         # Allocate memory
-        self.phis = np.zeros(
-            (num_frames, img_dims[0], img_dims[1], total_size),
+        self.phis = [0]*total_size
+        for i in xrange(total_size):
+            self.phis[i] = np.zeros(
+            (num_frames, img_dims[0], img_dims[1]),
             dtype=theano.config.floatX
-        )
+            )
+
         self.actions = np.zeros(
             (total_size, action_dims),
             dtype=theano.config.floatX
         )
+
         self.rewards = np.zeros((total_size, 1), dtype=theano.config.floatX)
         self.idxs = np.arange(total_size)
 
@@ -71,7 +79,7 @@ class Replay(Dataset):
         """
         phi_t, a_t, r_t, phi_{t+1}
         """
-        self.phis[:, :, :, self.current_exp] = phi
+        self.phis[self.current_exp] = phi
         self.actions[self.current_exp, :] = action
         self.rewards[self.current_exp, :] = reward
 
@@ -92,6 +100,18 @@ class Replay(Dataset):
         self.topo = topo
         self.targets = targets
         self.rng = rng
+
+        self.phis_temp = np.zeros((self.num_frames,
+            self.img_dims[0],
+            self.img_dims[1],
+            batch_size),
+            dtype=theano.config.floatX)
+
+        self.phis_prime_temp = np.zeros((self.num_frames,
+            self.img_dims[0],
+            self.img_dims[1],
+            batch_size),
+            dtype=theano.config.floatX)
 
         total_size = self.total_size - 1
         if not self.full:
@@ -141,18 +161,27 @@ class Replay(Dataset):
     def next(self):
         slice = self.iter.next()
         ids = self.idxs[slice].copy()
+
         if self.full:
             ids += self.current_exp
             ids %= self.total_size
 
         phi_prime_ids = (ids+1) % self.total_size
 
+        for i,_id in enumerate(ids):
+            self.phis_temp[:,:,:,i] = self.phis[_id]
+
+        for i,_id in enumerate(phi_prime_ids):
+            self.phis_prime_temp[:,:,:,i] = self.phis[_id]
+
+        actions = self.actions[ids]
+        rewards = self.rewards[ids].flatten()
+
         return (
-            self.phis[:, :, :, ids].astype(np.float32),
-            self.actions[ids],
-            self.rewards[ids].flatten(),
-            self.phis[:, :, :, phi_prime_ids].astype(np.float32)
-        )
+            self.phis_temp,
+            actions,
+            rewards,
+            self.phis_prime_temp)
 
     # TODO Remove this when dataset contract is corrected. Currently it is not
     # required but is required by FiniteDatasetIterator.

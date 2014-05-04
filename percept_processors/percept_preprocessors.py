@@ -117,6 +117,8 @@ class PerceptPreprocessor(object):
 
         ret = call([
             'ffmpeg',
+            '-v',
+            '0',
             '-i',
             frame_files,
             video_file
