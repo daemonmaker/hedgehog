@@ -34,13 +34,14 @@ from pylearn2.space import CompositeSpace
 from pylearn2.utils.data_specs import DataSpecsMapping
 
 # Internal
-from hedgehog.pylearn2.datasets.replay_list import Replay
+from hedgehog.pylearn2.datasets.replay import Replay
 import hedgehog.pylearn2.utils as utils
 import hedgehog.pylearn2.costs.action as ActionCost
 import hedgehog.percept_processors.percept_preprocessors as ppp
 
 log = logging.getLogger(__name__)
-logging.basicConfig(filename='basic.log',level=logging.DEBUG)
+logging.basicConfig(filename='basic.log', level=logging.DEBUG)
+
 
 def setup():
     N = 10000  # The paper keeps 1000000 memories
@@ -381,36 +382,53 @@ class BasicQAgent(object):
             if self.train_setup == 0:
                 self.train.main_loop()
 
-                data_specs = self.train.algorithm.cost.get_data_specs(self.model)
+                data_specs = self.train.algorithm.cost.get_data_specs(
+                    self.model)
 
-                # The iterator should be built from flat data specs, so it returns
-                # flat, non-redundent tuples of data.
+                # The iterator should be built from flat data specs, so it
+                # returns flat, non-redundent tuples of data.
                 mapping = DataSpecsMapping(data_specs)
                 space_tuple = mapping.flatten(data_specs[0], return_tuple=True)
-                source_tuple = mapping.flatten(data_specs[1], return_tuple=True)
+                source_tuple = mapping.flatten(
+                    data_specs[1],
+                    return_tuple=True
+                )
                 if len(space_tuple) == 0:
-                    # No data will be returned by the iterator, and it is impossible
-                    # to know the size of the actual batch.
-                    # It is not decided yet what the right thing to do should be.
-                    raise NotImplementedError("Unable to train with SGD, because "
-                            "the cost does not actually use data from the data set. "
-                            "data_specs: %s" % str(data_specs))
+                    # No data will be returned by the iterator, and it is
+                    # impossible to know the size of the actual batch. It
+                    # is not decided yet what the right thing to do should be.
+                    raise NotImplementedError(
+                        "Unable to train with SGD, because the cost does not"
+                        " actually use data from the data set. "
+                        "data_specs: %s" % str(data_specs)
+                    )
                 flat_data_specs = (CompositeSpace(space_tuple), source_tuple)
                 self.flat_data_specs = flat_data_specs
-                self.train_setup=1
+                self.train_setup = 1
+
             else:
                 tic_iter = time()
-                temp_iter = self.train.dataset.iterator(mode=self.train.algorithm.train_iteration_mode, batch_size=self.train.algorithm.batch_size, data_specs=self.flat_data_specs, return_tuple=True, rng = self.train.algorithm.rng, num_batches = self.train.algorithm.batches_per_iter)
+                temp_iter = self.train.dataset.iterator(
+                    mode=self.train.algorithm.train_iteration_mode,
+                    batch_size=self.train.algorithm.batch_size,
+                    data_specs=self.flat_data_specs,
+                    return_tuple=True,
+                    rng=self.train.algorithm.rng,
+                    num_batches=self.train.algorithm.batches_per_iter
+                )
                 toc_iter = time()
                 log.debug('Iter creation time: %0.2f' % (toc_iter - tic_iter))
+
                 tic_next = time()
                 batch = temp_iter.next()
                 toc_next = time()
                 log.debug('Iter next time: %0.2f' % (toc_next - tic_next))
+
                 tic_sgd = time()
                 self.train.algorithm.sgd_update(*batch)
                 toc_sgd = time()
                 log.debug('SGD time: %0.2f' % (toc_sgd - tic_sgd))
+
             toc = time()
             self.episode_training_time += toc-tic
             log.debug('Real train time: %0.2f' % (toc-tic))
@@ -501,11 +519,13 @@ class BasicQAgent(object):
                 self.top_score = self.total_reward
 
             log.info('--Episode %d--' % self.episode)
-            log.info('Score: %d - %s'
-                % (self.total_reward, high_score_string))
+            log.info(
+                'Score: %d - %s' % (self.total_reward, high_score_string)
+            )
             log.info('Time: %0.2f sec.' % episode_time)
-            log.info('Training time: %0.2f sec.'
-                % self.episode_training_time)
+            log.info(
+                'Training time: %0.2f sec.' % self.episode_training_time
+            )
             log.info('Training reward: %d' % int(self.train_reward))
             log.info('Parameter mean: %0.5e' % param)
 

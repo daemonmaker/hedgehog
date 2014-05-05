@@ -18,7 +18,8 @@ from time import time
 import logging
 
 log = logging.getLogger(__name__)
-logging.basicConfig(filename='basic.log',level=logging.DEBUG)
+logging.basicConfig(filename='basic.log', level=logging.DEBUG)
+
 
 class Replay(Dataset):
     #self.stochastic = False
@@ -56,8 +57,8 @@ class Replay(Dataset):
         self.phis = [0]*total_size
         for i in xrange(total_size):
             self.phis[i] = np.zeros(
-            (num_frames, img_dims[0], img_dims[1]),
-            dtype=theano.config.floatX
+                (num_frames, img_dims[0], img_dims[1]),
+                dtype=theano.config.floatX
             )
 
         self.actions = np.zeros(
@@ -101,16 +102,18 @@ class Replay(Dataset):
         self.targets = targets
         self.rng = rng
 
-        self.phis_temp = np.zeros((self.num_frames,
-            self.img_dims[0],
-            self.img_dims[1],
-            batch_size),
+        self.phis_temp = np.zeros(
+            (self.num_frames,
+             self.img_dims[0],
+             self.img_dims[1],
+             batch_size),
             dtype=theano.config.floatX)
 
-        self.phis_prime_temp = np.zeros((self.num_frames,
-            self.img_dims[0],
-            self.img_dims[1],
-            batch_size),
+        self.phis_prime_temp = np.zeros(
+            (self.num_frames,
+             self.img_dims[0],
+             self.img_dims[1],
+             batch_size),
             dtype=theano.config.floatX)
 
         total_size = self.total_size - 1
@@ -168,11 +171,11 @@ class Replay(Dataset):
 
         phi_prime_ids = (ids+1) % self.total_size
 
-        for i,_id in enumerate(ids):
-            self.phis_temp[:,:,:,i] = self.phis[_id]
+        for i, _id in enumerate(ids):
+            self.phis_temp[:, :, :, i] = self.phis[_id]
 
-        for i,_id in enumerate(phi_prime_ids):
-            self.phis_prime_temp[:,:,:,i] = self.phis[_id]
+        for i, _id in enumerate(phi_prime_ids):
+            self.phis_prime_temp[:, :, :, i] = self.phis[_id]
 
         actions = self.actions[ids]
         rewards = self.rewards[ids].flatten()
