@@ -32,6 +32,7 @@ from pylearn2.utils import wraps
 from pylearn2.termination_criteria import EpochCounter
 from pylearn2.space import CompositeSpace
 from pylearn2.utils.data_specs import DataSpecsMapping
+from pylearn2.training_algorithms.learning_rule import RPROP
 
 # Internal
 from hedgehog.pylearn2.datasets.replay import Replay
@@ -44,15 +45,15 @@ logging.basicConfig(filename='basic.log', level=logging.DEBUG)
 
 
 def setup():
-    N = 10000  # The paper keeps 1000000 memories
+    N = 150000  # The paper keeps 1,000,000 memories
     num_frames = 4  # Prescribed by paper
     img_dims = (84, 84)  # Prescribed by paper
     action_dims = 4  # Prescribed by ALE
     batch_size = 32
-    learning_rate = 0.5
+    learning_rate = 0.01
     batches_per_iter = 1  # How many batches to pull from memory
-    discount_factor = 0.001
-    base_dir = '/media/hd1/drl/experiments/2'
+    discount_factor = 0.98
+    base_dir = '/data/lisa/exp/webbd/drl/experiments/2014-10-30.2'
     model_pickle_path = os.path.join(base_dir, 'best_model.pkl')
 
     log.info("Creating action cost.")
@@ -92,7 +93,8 @@ def setup():
         #monitoring_dataset=monitoring_dataset
         monitoring_dataset=None,
         cost=action_cost,
-        termination_criterion=termination_criterion
+        termination_criterion=termination_criterion,
+        learning_rule=RPROP()
     )
 
     log.info("Creating training object.")
@@ -118,7 +120,9 @@ def setup():
         base_dir,
         model_pickle_path,
         discount_factor=discount_factor,
-        k=num_frames
+        k=num_frames,
+        epsilon=1,
+        epsilon_anneal_frames=1000000
     )
 
 
@@ -177,7 +181,7 @@ class BasicQAgent(object):
 
     def __init__(
         self, model, dataset, train, percept_preprocessor, action_map,
-        base_dir, model_pickle_path, save_rate=25,
+        base_dir, model_pickle_path, save_rate=100,
         epsilon=1, epsilon_anneal_frames=1000000, epsilon_end=0.1,
         discount_factor=0.8, k=4,
     ):
@@ -469,6 +473,9 @@ class BasicQAgent(object):
         y = self.y_func(reward, self.discount_factor, phi_prime)[:, None]
         return (phi, action, y)
 
+    def get_num_examples(self):
+        return 0
+
     def agent_end(self, reward):
         """
         Call to notify agent that episode is ending.
@@ -543,6 +550,7 @@ class BasicQAgent(object):
                 log.info('Done. Took %0.2f sec.' % (toc-tic))
 
                 video_name = 'episode_%06d.avi' % self.episode
+                self.percept_preprocessor.write_percepts()
                 self.percept_preprocessor.save_video(video_name)
 
             # Reset relevant variables

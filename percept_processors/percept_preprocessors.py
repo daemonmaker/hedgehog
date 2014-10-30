@@ -18,6 +18,7 @@ import os
 
 # Third-party
 import numpy as np
+from theano import config
 
 # Internal
 import hedgehog.pylearn2.utils as utils
@@ -31,8 +32,16 @@ class PerceptPreprocessor(object):
         Location wherein to save videos.
     frame_name_template: string
         Optional FFMPEG format string for identifying frame files.
+    save_percepts: boolean
+        Whether to save and write the percepts.
     """
-    def __init__(self, movie_dir, frame_name_template='frame_%07d.png'):
+    def __init__(
+        self,
+        movie_dir,
+        frame_name_template='frame_%07d.png',
+        percept_name_template='percept_%07d.png',
+        save_percepts=False
+    ):
         # Validate parameters and store
         assert(movie_dir)
         self.movie_dir = movie_dir
@@ -40,14 +49,25 @@ class PerceptPreprocessor(object):
         assert(frame_name_template)
         self.frame_name_template = frame_name_template
 
-        self.tmp_dir = os.path.join(self.movie_dir, 'frames_tmp')
+        assert(percept_name_template)
+        self.percept_name_template = percept_name_template
+
+        self.save_percepts = save_percepts
+        self.percept_count = 0
+
+        self.frames_tmp_dir = os.path.join(self.movie_dir, 'frames_tmp')
+        self.percepts_tmp_dir = os.path.join(self.movie_dir, 'percepts_tmp')
 
         self.reset_frames()
+        self.reset_percepts()
 
     def reset_frames(self):
         self.frames = []
 
-    def write_frames(self, loc):
+    def reset_percepts(self):
+        self.percepts = []
+
+    def write_images(self, loc, name_template, images, idx_offset=0):
         """
         Writes frames to disk.
 
@@ -61,14 +81,16 @@ class PerceptPreprocessor(object):
 
         tic = time()
 
-        for idx, frame in enumerate(self.frames):
-            img_obj = Image.fromarray(frame)
-            frame_file = os.path.join(loc, self.frame_name_template % idx)
-            img_obj.save(open(frame_file, 'w'))
+        for idx, image in enumerate(images):
+            img_obj = Image.fromarray(image)
+            image_file = os.path.join(loc, name_template % (idx_offset+idx))
+            img_obj.save(open(image_file, 'w'))
 
         toc = time()
 
         print 'Done. Took %0.2f sec.' % (toc-tic)
+
+        return len(images)
 
     def remove_frames(self, loc):
         """
@@ -131,18 +153,36 @@ class PerceptPreprocessor(object):
 
     def save_video(self, name, reset_frames_buffer=True):
         """
+        Writes frames to disk and then creates a video from them.
+
         name: string
             Name of the video.
         reset_frames_buffer: boolean
             Whether to reset the frames buffer. Useful for making partial
             videos.
         """
-        self.write_frames(self.tmp_dir)
-        self.create_video(self.tmp_dir, self.movie_dir, name)
-        self.remove_frames(self.tmp_dir)
+        self.write_images(
+            self.frames_tmp_dir,
+            self.frame_name_template,
+            self.frames
+        )
+        self.create_video(self.frames_tmp_dir, self.movie_dir, name)
+        self.remove_frames(self.frames_tmp_dir)
 
         if reset_frames_buffer:
             self.reset_frames()
+
+    def write_percepts(self):
+        """
+        Writes percepts to disk.
+        """
+        if self.save_percepts:
+            self.percept_count += self.write_images(
+                self.percepts_tmp_dir,
+                self.percept_name_template,
+                self.percepts,
+                self.percept_count
+            )
 
 
 class DeepMindPreprocessor(PerceptPreprocessor):
@@ -155,8 +195,11 @@ class DeepMindPreprocessor(PerceptPreprocessor):
     movie_dir: string
         Location wherein to store videos.
     """
-    def __init__(self, img_dims, movie_dir):
-        super(DeepMindPreprocessor, self).__init__(movie_dir)
+    def __init__(self, img_dims, movie_dir, save_percepts=False):
+        super(DeepMindPreprocessor, self).__init__(
+            movie_dir,
+            save_percepts=save_percepts
+        )
 
         assert(type(img_dims) == tuple and len(img_dims) == 2)
         self.img_dims = img_dims
@@ -191,12 +234,19 @@ class DeepMindPreprocessor(PerceptPreprocessor):
 
         self.frames.append(image)
 
+        # Resize and crop
+        image = utils.resize_image(image, self.reduced_frame_size)
+        image = utils.crop_image(image, self.crop_start, self.img_dims)
+
+        if self.save_percepts:
+            self.percepts.append(image)
+
         # Convert to black and white
         image = np.sqrt(np.sum((image**2), axis=2))
         image = image.astype(np.uint8)
 
-        # Resize and crop
-        image = utils.resize_image(image, self.reduced_frame_size)
-        image = utils.crop_image(image, self.crop_start, self.img_dims)
+        # 26. Was the max value
+        # in the frames at the time of inspection
+        image = image.astype(config.floatX) / 26.
 
         return image

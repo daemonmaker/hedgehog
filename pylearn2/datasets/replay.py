@@ -191,6 +191,9 @@ class Replay(Dataset):
     def get_design_matrix(self, topo=None):
         return self.phis
 
+    def get_num_examples(self):
+        return 0
+
 
 def test_iter():
     n = 10
