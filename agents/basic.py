@@ -235,6 +235,10 @@ class BasicQAgent(object):
 
         self.train.dataset = self
 
+        # How many actual actions does RL-Glue/ALE support? Can we query the available actions
+        # for a given game and make this part more efficient? Using 20 for now.
+        self.action_log = {i: 0 for i in range(20)}
+
         # Init helper member variables
         self.action_count = 0
         self.reward = 0  # Accumulator for reward values
@@ -361,6 +365,7 @@ class BasicQAgent(object):
             else:
                 # Get random action
                 action_int = np.random.randint(0, len(self.action_map))
+            self.action_log[action_int] += 1
 
             self.cmd = [0]*len(self.action_map)
             self.cmd[action_int] = 1
@@ -437,6 +442,7 @@ class BasicQAgent(object):
 
                 log.info('Frames seen: %d' % self.all_time_total_frames)
                 log.info('Epsilon: %0.10f' % self.epsilon)
+                log.info('Actions histogram: %s' % self.action_log)
 
             toc = time()
             self.episode_training_time += toc-tic
