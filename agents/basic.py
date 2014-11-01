@@ -45,15 +45,15 @@ logging.basicConfig(filename='basic.log', level=logging.DEBUG)
 
 
 def setup():
-    N = 150000  # The paper keeps 1,000,000 memories
+    N = 300000  # The paper keeps 1,000,000 memories
     num_frames = 4  # Prescribed by paper
     img_dims = (84, 84)  # Prescribed by paper
     action_dims = 4  # Prescribed by ALE
     batch_size = 32
-    learning_rate = 0.01
+    learning_rate = 0.05
     batches_per_iter = 1  # How many batches to pull from memory
-    discount_factor = 0.98
-    base_dir = '/data/lisa/exp/webbd/drl/experiments/2014-10-30.2'
+    discount_factor = 0.95
+    base_dir = '/data/lisa/exp/webbd/drl/experiments/2014-11-01'
     model_pickle_path = os.path.join(base_dir, 'best_model.pkl')
 
     log.info("Creating action cost.")
@@ -122,7 +122,7 @@ def setup():
         discount_factor=discount_factor,
         k=num_frames,
         epsilon=1,
-        epsilon_anneal_frames=1000000
+        epsilon_anneal_frames=5000000
     )
 
 
@@ -224,9 +224,11 @@ class BasicQAgent(object):
         assert(epsilon_end >= 0)
         self.epsilon_end = epsilon_end
 
+        self.epsilon_annealing_rate = 0
         if self.epsilon_anneal_frames > 0:
-            self.epsilon_annealing_rate = (self.epsilon - self.epsilon_end)
-            self.epsilon_annealing_rate /= self.epsilon_anneal_frames
+            self.epsilon_annealing_rate = float(self.epsilon - self.epsilon_end)
+            self.epsilon_annealing_rate /= float(self.epsilon_anneal_frames)
+        log.info('Epsilon annealing rate: %0.10f' % self.epsilon_annealing_rate)
 
         assert(k > 0)
         self.k = k
@@ -432,6 +434,9 @@ class BasicQAgent(object):
                 self.train.algorithm.sgd_update(*batch)
                 toc_sgd = time()
                 log.debug('SGD time: %0.2f' % (toc_sgd - tic_sgd))
+
+                log.info('Frames seen: %d' % self.all_time_total_frames)
+                log.info('Epsilon: %0.10f' % self.epsilon)
 
             toc = time()
             self.episode_training_time += toc-tic
