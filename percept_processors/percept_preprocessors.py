@@ -247,6 +247,6 @@ class DeepMindPreprocessor(PerceptPreprocessor):
 
         # 26. Was the max value
         # in the frames at the time of inspection
-        image = image.astype(config.floatX) / 26.
+        image = (image.astype(config.floatX) / 26.) - 0.5
 
         return image
