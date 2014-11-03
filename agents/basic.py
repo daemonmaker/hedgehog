@@ -45,7 +45,7 @@ logging.basicConfig(filename='basic.log', level=logging.DEBUG)
 
 
 def setup():
-    N = 300000  # The paper keeps 1,000,000 memories
+    N = 200000  # The paper keeps 1,000,000 memories
     num_frames = 4  # Prescribed by paper
     img_dims = (84, 84)  # Prescribed by paper
     action_dims = 4  # Prescribed by ALE
@@ -53,7 +53,7 @@ def setup():
     learning_rate = 0.05
     batches_per_iter = 1  # How many batches to pull from memory
     discount_factor = 0.95
-    base_dir = '/data/lisa/exp/webbd/drl/experiments/2014-11-01'
+    base_dir = '/data/lisa/exp/webbd/drl/experiments/2014-11-02'
     model_pickle_path = os.path.join(base_dir, 'best_model.pkl')
 
     log.info("Creating action cost.")
@@ -442,7 +442,6 @@ class BasicQAgent(object):
 
                 log.info('Frames seen: %d' % self.all_time_total_frames)
                 log.info('Epsilon: %0.10f' % self.epsilon)
-                log.info('Actions histogram: %s' % self.action_log)
 
             toc = time()
             self.episode_training_time += toc-tic
@@ -561,8 +560,18 @@ class BasicQAgent(object):
                 log.info('Done. Took %0.2f sec.' % (toc-tic))
 
                 video_name = 'episode_%06d.avi' % self.episode
+
                 self.percept_preprocessor.write_percepts()
                 self.percept_preprocessor.save_video(video_name)
+
+                total_episode_actions = 0
+                for k in self.action_log.keys():
+                    total_episode_actions += self.action_log[k]
+                for k in self.action_log.keys():
+                    self.action_log[k] /= float(total_episode_actions)
+                log.info('Actions histogram: %s' % self.action_log)
+                for k in self.action_log.keys():
+                    self.action_log[k] = 0
 
             # Reset relevant variables
             self.percept_preprocessor.reset_frames()
