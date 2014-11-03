@@ -54,12 +54,11 @@ class Replay(Dataset):
         self.action_dims = action_dims
 
         # Allocate memory
-        self.phis = [0]*total_size
-        for i in xrange(total_size):
-            self.phis[i] = np.zeros(
-                (num_frames, img_dims[0], img_dims[1]),
-                dtype=theano.config.floatX
-            )
+        self.phis = np.zeros(
+            (total_size, num_frames, img_dims[0], img_dims[1]),
+            dtype=theano.config.floatX
+        )
+
 
         self.actions = np.zeros(
             (total_size, action_dims),
