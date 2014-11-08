@@ -15,6 +15,7 @@ import cPickle
 from subprocess import call
 import glob
 import os
+import os.path as op
 
 # Third-party
 import numpy as np
@@ -22,6 +23,11 @@ from theano import config
 
 # Internal
 import hedgehog.pylearn2.utils as utils
+
+
+def ensure_dir_exists(directory):
+    if not op.exists(directory):
+        os.makedirs(directory)
 
 
 class PerceptPreprocessor(object):
@@ -161,6 +167,7 @@ class PerceptPreprocessor(object):
             Whether to reset the frames buffer. Useful for making partial
             videos.
         """
+        ensure_dir_exists(self.frames_tmp_dir)
         self.write_images(
             self.frames_tmp_dir,
             self.frame_name_template,
@@ -176,6 +183,7 @@ class PerceptPreprocessor(object):
         """
         Writes percepts to disk.
         """
+        ensure_dir_exists(self.percepts_tmp_dir)
         if self.save_percepts:
             self.percept_count += self.write_images(
                 self.percepts_tmp_dir,
