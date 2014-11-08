@@ -8,14 +8,15 @@ __license__ = "3-clause BSD"
 __maintainer__ = "Dustin Webb"
 __email__ = "webbd@iro"
 
+import ipdb
 import numpy as np
 from pylearn2.utils import wraps
 from pylearn2.datasets import Dataset
 import pylearn2.utils.iteration as iteration
-import ipdb
-import theano
 from time import time
 import logging
+
+import theano
 
 log = logging.getLogger(__name__)
 logging.basicConfig(filename='basic.log', level=logging.DEBUG)
@@ -59,28 +60,23 @@ class Replay(Dataset):
             dtype=theano.config.floatX
         )
 
-
         self.actions = np.zeros(
-            (total_size, action_dims),
-            dtype=theano.config.floatX
+            (total_size, 1),
+            dtype='int8'
         )
 
         self.rewards = np.zeros((total_size, 1), dtype=theano.config.floatX)
-        self.idxs = np.arange(total_size)
 
         # Setup ring
         self.current_exp = 0
         self.full = False  # Whether the memory is full
-
-    def can_sample(self):
-        return self.full or (self.current_exp > 1)
 
     def add(self, phi, action, reward):
         """
         phi_t, a_t, r_t, phi_{t+1}
         """
         self.phis[self.current_exp] = phi
-        self.actions[self.current_exp, :] = action
+        self.actions[self.current_exp] = np.argmax(action)
         self.rewards[self.current_exp, :] = reward
 
         self.current_exp += 1
@@ -161,8 +157,7 @@ class Replay(Dataset):
         return self
 
     def next(self):
-        slice = self.iter.next()
-        ids = self.idxs[slice].copy()
+        ids = self.iter.next()
 
         if self.full:
             ids += self.current_exp
@@ -176,7 +171,12 @@ class Replay(Dataset):
         for i, _id in enumerate(phi_prime_ids):
             self.phis_prime_temp[:, :, :, i] = self.phis[_id]
 
-        actions = self.actions[ids]
+        actions = np.zeros(
+            (self.batch_size, self.action_dims),
+            dtype='int8'
+        )
+        actions[range(self.batch_size), self.actions[ids]] = 1
+
         rewards = self.rewards[ids].flatten()
 
         return (
